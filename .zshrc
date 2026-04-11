@@ -5,7 +5,6 @@ export EDITOR="nvim"
 export VISUAL="nvim"
 
 plugins=(
-  fzf-tab
   zsh-autosuggestions
   zsh-vim-mode
   zsh-syntax-highlighting
