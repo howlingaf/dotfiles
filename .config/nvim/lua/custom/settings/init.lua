@@ -116,3 +116,6 @@ vim.api.nvim_create_autocmd('TextYankPost', {
     vim.highlight.on_yank()
   end,
 })
+
+-- Load machine-local overrides if present (colorscheme, etc.)
+pcall(require, 'local')
