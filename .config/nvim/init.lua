@@ -10,36 +10,13 @@ if not (vim.uv or vim.loop).fs_stat(lazypath) then
 end ---@diagnostic disable-next-line: undefined-field
 vim.opt.rtp:prepend(lazypath)
 
--- If nvim is opened with a directory, open Yazi instead
-vim.api.nvim_create_autocmd('VimEnter', {
-  callback = function(data)
-    local dir = data.file
-    if vim.fn.isdirectory(dir) == 0 then
-      return
-    end
-
-    -- Change cwd to that directory
-    vim.cmd.cd(vim.fn.fnameescape(dir))
-
-    -- Wipe all buffers so we don't see an empty one
-    vim.cmd 'silent! %bwipeout'
-
-    -- Open Yazi directly
-    vim.cmd 'Yazi cwd'
-
-    -- Prevent further autocmds from interfering
-    vim.cmd 'doautocmd User YaziLaunch'
-  end,
-})
-
-require('lazy').setup({
-  'tpope/vim-sleuth',
+require('lazy').setup {
+  { 'tpope/vim-sleuth', event = 'BufReadPre' },
 
   {
     'nvim-telescope/telescope.nvim',
-    event = 'VimEnter',
     branch = '0.1.x',
-
+    cmd = 'Telescope',
     dependencies = {
       'nvim-lua/plenary.nvim',
       {
@@ -51,7 +28,44 @@ require('lazy').setup({
       },
       { 'nvim-tree/nvim-web-devicons', enabled = vim.g.have_nerd_font },
     },
-
+    keys = {
+      { '<leader>sk', '<cmd>Telescope keymaps<cr>', desc = '[S]earch [K]eymaps' },
+      { '<leader>sf', '<cmd>Telescope find_files<cr>', desc = '[S]earch [F]iles' },
+      { '<leader>ss', '<cmd>Telescope builtin<cr>', desc = '[S]earch [S]elect Telescope' },
+      { '<leader>sw', '<cmd>Telescope grep_string<cr>', desc = '[S]earch current [W]ord' },
+      { '<leader>sg', '<cmd>Telescope live_grep<cr>', desc = '[S]earch by [G]rep' },
+      { '<leader>sd', '<cmd>Telescope diagnostics<cr>', desc = '[S]earch [D]iagnostics' },
+      { '<leader>sr', '<cmd>Telescope resume<cr>', desc = '[S]earch [R]esume' },
+      { '<leader>s.', '<cmd>Telescope oldfiles<cr>', desc = '[S]earch Recent Files ("." for repeat)' },
+      { '<leader><leader>', '<cmd>Telescope buffers<cr>', desc = '[ ] Find existing buffers' },
+      {
+        '<leader>/',
+        function()
+          require('telescope.builtin').current_buffer_fuzzy_find(require('telescope.themes').get_dropdown {
+            winblend = 10,
+            previewer = false,
+          })
+        end,
+        desc = '[/] Fuzzily search in current buffer',
+      },
+      {
+        '<leader>s/',
+        function()
+          require('telescope.builtin').live_grep {
+            grep_open_files = true,
+            prompt_title = 'Live Grep in Open Files',
+          }
+        end,
+        desc = '[S]earch [/] in Open Files',
+      },
+      {
+        '<leader>sn',
+        function()
+          require('telescope.builtin').find_files { cwd = vim.fn.stdpath 'config' }
+        end,
+        desc = '[S]earch [N]eovim files',
+      },
+    },
     config = function()
       require('telescope').setup {
         defaults = {
@@ -60,87 +74,13 @@ require('lazy').setup({
             '%.git/',
             'dist/',
             'build/',
-            '%.lock', -- optional: ignore lock files
+            '%.lock',
             '__pycache__/',
             '%.cache/',
           },
         },
       }
-
       pcall(require('telescope').load_extension, 'fzf')
-
-      local builtin = require 'telescope.builtin'
-      vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps' })
-      vim.keymap.set('n', '<leader>sf', builtin.find_files, { desc = '[S]earch [F]iles' })
-      vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
-      vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
-      vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
-      vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
-      vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
-      vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
-      vim.keymap.set('n', '<leader><leader>', builtin.buffers, { desc = '[ ] Find existing buffers' })
-
-      vim.keymap.set('n', '<leader>/', function()
-        builtin.current_buffer_fuzzy_find(require('telescope.themes').get_dropdown {
-          winblend = 10,
-          previewer = false,
-        })
-      end, { desc = '[/] Fuzzily search in current buffer' })
-
-      vim.keymap.set('n', '<leader>s/', function()
-        builtin.live_grep {
-          grep_open_files = true,
-          prompt_title = 'Live Grep in Open Files',
-        }
-      end, { desc = '[S]earch [/] in Open Files' })
-
-      vim.keymap.set('n', '<leader>sn', function()
-        builtin.find_files { cwd = vim.fn.stdpath 'config' }
-      end, { desc = '[S]earch [N]eovim files' })
-    end,
-  },
-  ---@type LazySpec
-  {
-    'mikavilpas/yazi.nvim',
-    version = '*',
-    event = 'VeryLazy',
-    dependencies = {
-      { 'nvim-lua/plenary.nvim', lazy = true },
-    },
-    keys = {
-      {
-        '<leader>-',
-        mode = { 'n', 'v' },
-        '<cmd>Yazi<cr>',
-        desc = 'Open yazi at the current file',
-      },
-      {
-        '<leader>e',
-        function()
-          -- If Yazi is open, quit it (like pressing q)
-          for _, win in ipairs(vim.api.nvim_list_wins()) do
-            local buf = vim.api.nvim_win_get_buf(win)
-            local ft = vim.bo[buf].filetype
-            if ft == 'yazi' then
-              vim.api.nvim_win_close(win, true)
-              return
-            end
-          end
-
-          -- Otherwise, open Yazi in the cwd
-          vim.cmd 'Yazi cwd'
-        end,
-        desc = "Open Yazi or quit it (acts like 'q')",
-      },
-    },
-    opts = {
-      open_for_directories = false,
-      keymaps = {
-        show_help = '<f1>',
-      },
-    },
-    init = function()
-      vim.g.loaded_netrwPlugin = 1
     end,
   },
   {
@@ -352,52 +292,6 @@ require('lazy').setup({
       },
     },
   },
-  {
-    'folke/flash.nvim',
-    event = 'VeryLazy',
-    keys = {
-      {
-        's',
-        mode = { 'n', 'x', 'o' },
-        function()
-          require('flash').jump()
-        end,
-        desc = 'Flash',
-      },
-      {
-        'S',
-        mode = { 'n', 'x', 'o' },
-        function()
-          require('flash').treesitter()
-        end,
-        desc = 'Flash Treesitter',
-      },
-      {
-        'r',
-        mode = 'o',
-        function()
-          require('flash').remote()
-        end,
-        desc = 'Remote Flash',
-      },
-      {
-        'R',
-        mode = { 'o', 'x' },
-        function()
-          require('flash').treesitter_search()
-        end,
-        desc = 'Treesitter Search',
-      },
-      {
-        '<c-s>',
-        mode = { 'c' },
-        function()
-          require('flash').toggle()
-        end,
-        desc = 'Toggle Flash Search',
-      },
-    },
-  },
   { 'Bilal2453/luvit-meta', lazy = true },
   {
     'stevearc/conform.nvim',
@@ -435,9 +329,11 @@ require('lazy').setup({
   },
 
   {
-    -- Class / interface outline
     'stevearc/aerial.nvim',
-    event = 'VeryLazy',
+    cmd = 'AerialToggle',
+    keys = {
+      { '<leader>o', '<cmd>AerialToggle!<CR>', desc = 'Toggle class outline' },
+    },
     dependencies = { 'nvim-treesitter/nvim-treesitter', 'nvim-tree/nvim-web-devicons' },
     opts = {
       backends = { 'lsp', 'treesitter' },
@@ -445,21 +341,6 @@ require('lazy').setup({
       show_guides = true,
       filter_kind = false,
     },
-    config = function(_, opts)
-      require('aerial').setup(opts)
-      vim.keymap.set('n', '<leader>o', '<cmd>AerialToggle!<CR>', { desc = 'Toggle class outline' })
-
-      -- optional: auto-open when a TypeScript file defines a class
-      vim.api.nvim_create_autocmd('BufReadPost', {
-        pattern = '*.ts',
-        callback = function()
-          local has_class = vim.fn.search('\\<class\\>', 'nw') ~= 0
-          if has_class then
-            require('aerial').open()
-          end
-        end,
-      })
-    end,
   },
   {
     'hrsh7th/nvim-cmp',
@@ -492,7 +373,7 @@ require('lazy').setup({
       luasnip.config.setup {}
 
       -- Load custom snippets
-      require('snippets')
+      require 'snippets'
 
       cmp.setup {
         snippet = {
@@ -542,47 +423,12 @@ require('lazy').setup({
     end,
   },
 
-  {
-    'folke/tokyonight.nvim',
-    priority = 1000,
-    config = function()
-      require('tokyonight').setup {
-        style = 'storm', -- "storm" = deep contrast / best with blur
-        transparent = true,
-        terminal_colors = true,
-        styles = {
-          sidebars = 'transparent',
-          floats = 'transparent',
-        },
-        on_colors = function(colors)
-          -- Slightly desaturate for that glassy, Iosevka look
-          colors.comment = '#666c8f'
-          colors.bg = 'none'
-          colors.bg_sidebar = 'none'
-          colors.bg_float = 'none'
-        end,
-        on_highlights = function(hl, c)
-          -- Soften comments and highlight groups
-          hl.Comment = { fg = c.comment, italic = true }
-          hl.NormalFloat = { bg = 'none' }
-          hl.FloatBorder = { fg = c.border_highlight, bg = 'none' }
-          hl.LineNr = { fg = '#565f89' }
-          hl.CursorLineNr = { fg = '#c0caf5', bold = true }
-          hl.Pmenu = { bg = 'none', fg = c.fg }
-          hl.PmenuSel = { bg = '#2f3549', fg = '#c0caf5' }
-        end,
-      }
-
-      -- Apply after setup
-      vim.cmd [[colorscheme tokyonight]]
-    end,
-  },
-  { 'folke/todo-comments.nvim', event = 'VimEnter', dependencies = { 'nvim-lua/plenary.nvim' }, opts = { signs = false } },
+  { 'folke/todo-comments.nvim', event = 'BufReadPost', dependencies = { 'nvim-lua/plenary.nvim' }, opts = { signs = false } },
 
   {
     'echasnovski/mini.nvim',
     config = function()
-      require('mini.ai').setup { n_lines = 500 }
+      require('mini.ai').setup { n_lines = 100 }
       require('mini.surround').setup()
 
       local statusline = require 'mini.statusline'
@@ -616,7 +462,7 @@ require('lazy').setup({
         'java',
         'go',
       },
-      auto_install = true,
+      auto_install = false,
       highlight = {
         enable = true,
         additional_vim_regex_highlighting = { 'ruby' },
@@ -631,25 +477,5 @@ require('lazy').setup({
   require 'kickstart.plugins.gitsigns',
 
   { import = 'custom.plugins' },
-  { import = 'custom.plugins.obsidian' },
   { import = 'custom.plugins.csv' },
-}, {
-
-  ui = {
-    icons = vim.g.have_nerd_font and {} or {
-      cmd = '⌘',
-      config = '🛠',
-      event = '📅',
-      ft = '📂',
-      init = '⚙',
-      keys = '🗝',
-      plugin = '🔌',
-      runtime = '💻',
-      require = '🌙',
-      source = '📄',
-      start = '🚀',
-      task = '📌',
-      lazy = '💤 ',
-    },
-  },
-})
+}
