@@ -1,4 +1,6 @@
 export ZSH="$HOME/.oh-my-zsh"
+export PATH="$HOME/.cargo/bin:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
 export EDITOR="nvim"
 export VISUAL="nvim"
 
@@ -15,6 +17,7 @@ bindkey -v
 bindkey -M viins 'jk' vi-cmd-mode
 
 alias vi="nvim"
+alias vd="visidata"
 alias src=". $HOME/.zshrc && echo '.zshrc sourced'"
 alias rc="nvim $HOME/.zshrc"
 alias dg='git --git-dir=$HOME/.dotfiles --work-tree=$HOME'
