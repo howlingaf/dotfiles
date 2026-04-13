@@ -65,6 +65,13 @@ require('lazy').setup {
         end,
         desc = '[S]earch [N]eovim files',
       },
+      {
+        '<leader>e',
+        function()
+          require('telescope.builtin').find_files { cwd = vim.fn.getcwd() }
+        end,
+        desc = 'Browse files in working directory',
+      },
     },
     config = function()
       require('telescope').setup {
