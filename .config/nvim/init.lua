@@ -37,7 +37,6 @@ require('lazy').setup {
       { '<leader>sd', '<cmd>Telescope diagnostics<cr>', desc = '[S]earch [D]iagnostics' },
       { '<leader>sr', '<cmd>Telescope resume<cr>', desc = '[S]earch [R]esume' },
       { '<leader>s.', '<cmd>Telescope oldfiles<cr>', desc = '[S]earch Recent Files ("." for repeat)' },
-      { '<leader><leader>', '<cmd>Telescope buffers<cr>', desc = '[ ] Find existing buffers' },
       {
         '<leader>/',
         function()
@@ -291,6 +290,13 @@ require('lazy').setup {
     end,
   },
   {
+    'andymass/vim-matchup',
+    event = 'BufReadPost',
+    config = function()
+      vim.g.matchup_matchparen_offscreen = { method = 'popup' }
+    end,
+  },
+  {
     'folke/lazydev.nvim',
     ft = 'lua',
     opts = {
@@ -466,6 +472,7 @@ require('lazy').setup {
         'python',
         'javascript',
         'typescript',
+        'tsx',
         'java',
         'go',
       },
@@ -475,6 +482,7 @@ require('lazy').setup {
         additional_vim_regex_highlighting = { 'ruby' },
       },
       indent = { enable = true, disable = { 'ruby' } },
+      matchup = { enable = true },
     },
   },
 

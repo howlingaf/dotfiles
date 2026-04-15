@@ -29,9 +29,23 @@ alias vd="visidata"
 alias src=". $HOME/.zshrc && echo '.zshrc sourced'"
 alias rc="nvim $HOME/.zshrc"
 alias dg='git --git-dir=$HOME/.dotfiles --work-tree=$HOME'
-alias cl='claude -c'
-alias cr='claude -r'
-alias c='claude'
+unalias cl cr c 2>/dev/null
+cl() {
+  local root
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$PWD
+  (cd "$root" && claude -c "$@")
+}
+cr() {
+  local root
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$PWD
+  (cd "$root" && claude -r "$@")
+}
+c() {
+  local root
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$PWD
+  (cd "$root" && claude "$@")
+}
+alias nv='cd $HOME/.config/nvim && nvim .'
 
 eval "$(zoxide init zsh)"
 
@@ -69,3 +83,5 @@ bindkey '^S' fzf_edit_history
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+
+

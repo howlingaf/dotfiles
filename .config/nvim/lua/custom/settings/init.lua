@@ -108,6 +108,12 @@ vim.opt.termguicolors = true
 
 vim.keymap.set('n', '<leader>wr', ':set wrap!<CR>', { noremap = true, silent = true })
 
+vim.keymap.set('n', '<leader><leader>', '<cmd>set rnu!<CR>', { desc = 'Toggle relative line numbers' })
+
+vim.keymap.set('n', '<leader>cl', function()
+  vim.fn.system "tmux split-window -h -c '#{pane_current_path}' 'claude -c'"
+end, { desc = 'Open Claude (continue) in tmux vertical split' })
+
 -- Highlight text momentarily after yanking.
 vim.api.nvim_create_autocmd('TextYankPost', {
   desc = 'Highlight when yanking (copying) text',
