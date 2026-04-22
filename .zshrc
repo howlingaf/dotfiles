@@ -11,15 +11,22 @@ export PATH="$HOME/.local/bin:$PATH"
 export EDITOR="nvim"
 export VISUAL="nvim"
 
+# Ctrl-D at empty prompt does nothing (prevents accidental shell exit +
+# tmux pane close + eventual server death).
+setopt IGNORE_EOF
+
 ZSH_THEME="powerlevel10k/powerlevel10k"
 
 plugins=(
   zsh-autosuggestions
   zsh-vim-mode
   zsh-syntax-highlighting
+  zsh-edit
 )
 
 source $ZSH/oh-my-zsh.sh
+
+eval "$(zoxide init zsh)"
 
 bindkey -v
 bindkey -M viins 'jk' vi-cmd-mode
@@ -27,27 +34,32 @@ bindkey -M viins 'jk' vi-cmd-mode
 alias vi="nvim"
 alias vd="visidata"
 alias src=". $HOME/.zshrc && echo '.zshrc sourced'"
-alias rc="nvim $HOME/.zshrc"
+alias rc="nvim $HOME/.zshrc ; . $HOME/.zshrc"
 alias dg='git --git-dir=$HOME/.dotfiles --work-tree=$HOME'
 unalias cl cr c 2>/dev/null
+
+
 cl() {
   local root
   root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$PWD
-  (cd "$root" && claude -c "$@")
+  cd "$root"
+  claude -c "$@"
 }
+
 cr() {
   local root
   root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$PWD
-  (cd "$root" && claude -r "$@")
+  cd "$root"
+  claude -c "$@"
 }
+
 c() {
   local root
   root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$PWD
-  (cd "$root" && claude "$@")
+  cd "$root"
+  claude -c "$@"
 }
-alias nv='cd $HOME/.config/nvim && nvim .'
 
-eval "$(zoxide init zsh)"
 
 chpwd(){
     local tmp=$(grep -v "^$OLDPWD$" ~/.cd_history)
@@ -58,25 +70,28 @@ chpwd(){
 fzf_edit_history(){
   local file=$(tac ~/.edit_history | fzy)
   if [[ -z "$file" ]]; then
-    zle reset-prompt
     return
   fi
   local dir=${file%/*}
   cd "$dir"
   nvim "$file"
-  zle reset-prompt
 }
 
 fzf_cd_history(){
   local dir=$(tac ~/.cd_history | fzy)
   [[ -n "$dir" ]] && cd "$dir"
-  zle reset-prompt
 }
 
-zle -N fzf_cd_history
-bindkey '^A' fzf_cd_history
-zle -N fzf_edit_history
-bindkey '^S' fzf_edit_history
+bind '^A' fzf_cd_history
+bind '^S' fzf_edit_history
+
+
+foo (){
+  echo "hi"
+}
+
+bind '^F' foo
+
 
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl
