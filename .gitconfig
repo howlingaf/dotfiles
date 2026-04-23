@@ -1,0 +1,17 @@
+[include]
+	path = ~/.gitconfig.mac
+[include]
+	path = ~/.gitconfig.wsl
+[core]
+	pager = delta
+[interactive]
+	diffFilter = delta --color-only
+[delta]
+	navigate = true
+	line-numbers = true
+[merge]
+	conflictstyle = diff3
+[diff]
+	colorMoved = default
+[credential]
+	helper = osxkeychain
