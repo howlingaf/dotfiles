@@ -75,6 +75,7 @@ require('lazy').setup {
     config = function()
       require('telescope').setup {
         defaults = {
+          preview = { treesitter = false },
           file_ignore_patterns = {
             'node_modules',
             '%.git/',
@@ -455,36 +456,21 @@ require('lazy').setup {
   },
   {
     'nvim-treesitter/nvim-treesitter',
-    branch = 'master',
+    branch = 'main',
     build = ':TSUpdate',
-    main = 'nvim-treesitter.configs',
-    opts = {
-      ensure_installed = {
-        'bash',
-        'c',
-        'cpp',
-        'diff',
-        'html',
-        'lua',
-        'luadoc',
-        'query',
-        'vim',
-        'vimdoc',
-        'python',
-        'javascript',
-        'typescript',
-        'tsx',
-        'java',
-        'go',
-      },
-      auto_install = false,
-      highlight = {
-        enable = true,
-        additional_vim_regex_highlighting = { 'ruby' },
-      },
-      indent = { enable = false },
-      matchup = { enable = true },
-    },
+    event = { 'BufReadPre', 'BufNewFile' },
+    config = function()
+      require('nvim-treesitter').install({
+        'bash', 'c', 'cpp', 'diff', 'html', 'lua', 'luadoc', 'query',
+        'vim', 'vimdoc', 'python', 'javascript', 'typescript', 'tsx',
+        'java', 'go',
+      })
+      vim.api.nvim_create_autocmd('FileType', {
+        callback = function(ev)
+          pcall(vim.treesitter.start, ev.buf)
+        end,
+      })
+    end,
   },
 
   require 'kickstart.plugins.indent_line',

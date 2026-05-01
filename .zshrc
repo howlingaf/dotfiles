@@ -53,7 +53,7 @@ cr() {
   local root
   root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$PWD
   cd "$root"
-  claude -c "$@"
+  claude -r "$@"
 }
 
 c() {
@@ -93,6 +93,11 @@ launch_nvim(){
 bind '^A' fzf_cd_history
 bind '^S' fzf_edit_history
 bind '^N' launch_nvim
+
+
+foo (){
+  echo "hi"
+}
 
 
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
