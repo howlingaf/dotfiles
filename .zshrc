@@ -97,3 +97,4 @@ bind '^F' foo
 
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl
+[[ -f ~/.zshrc.linux ]] && source ~/.zshrc.linux

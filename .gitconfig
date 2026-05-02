@@ -2,6 +2,8 @@
 	path = ~/.gitconfig.mac
 [include]
 	path = ~/.gitconfig.wsl
+[include]
+	path = ~/.gitconfig.linux
 [core]
 	pager = delta
 [interactive]
@@ -13,5 +15,3 @@
 	conflictstyle = diff3
 [diff]
 	colorMoved = default
-[credential]
-	helper = osxkeychain
