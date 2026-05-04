@@ -482,7 +482,7 @@ require('lazy').setup {
         enable = true,
         additional_vim_regex_highlighting = { 'ruby' },
       },
-      indent = { enable = true, disable = { 'ruby' } },
+      indent = { enable = false },
       matchup = { enable = true },
     },
   },

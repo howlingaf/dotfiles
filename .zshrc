@@ -34,6 +34,7 @@ bindkey -v
 bindkey -M viins 'jk' vi-cmd-mode
 
 alias vi="nvim"
+alias nv="cd $HOME/.config/nvim/ && nvim ."
 alias vd="visidata"
 alias src=". $HOME/.zshrc && echo '.zshrc sourced'"
 alias rc="nvim $HOME/.zshrc ; . $HOME/.zshrc"
@@ -84,15 +85,14 @@ fzf_cd_history(){
   [[ -n "$dir" ]] && cd "$dir"
 }
 
-bind '^A' fzf_cd_history
-bind '^S' fzf_edit_history
-
-
-foo (){
-  echo "hi"
+launch_nvim(){
+  nvim .
 }
 
-bind '^F' foo
+
+bind '^A' fzf_cd_history
+bind '^S' fzf_edit_history
+bind '^N' launch_nvim
 
 
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac

@@ -37,6 +37,8 @@ vim.opt.tabstop = 4 -- Display tabs as 4 spaces.
 vim.opt.softtabstop = 4 -- Insert 4 spaces per <Tab>.
 vim.opt.expandtab = true -- Use spaces instead of tabs.
 vim.opt.shiftwidth = 2 -- Indent with 2 spaces.
+vim.opt.autoindent = true -- Copy indent from current line on new line.
+vim.opt.smartindent = true -- Add indent for new blocks in C-like syntax.
 vim.opt.textwidth = 80 -- Line wrap limit.
 vim.opt.colorcolumn = '80' -- Draw a vertical line at column 80.
 vim.opt.completeopt = 'menuone,noselect' -- Better completion behavior.
@@ -138,6 +140,27 @@ vim.api.nvim_create_autocmd('TextYankPost', {
     vim.highlight.on_yank()
   end,
 })
+
+-- Use terminal background (transparent) — re-applied on every colorscheme load.
+local function transparent_bg()
+  for _, group in ipairs {
+    'Normal',
+    'NormalNC',
+    'NormalFloat',
+    'FloatBorder',
+    'SignColumn',
+    'EndOfBuffer',
+    'LineNr',
+    'CursorLineNr',
+  } do
+    local hl = vim.api.nvim_get_hl(0, { name = group })
+    hl.bg = 'none'
+    hl.ctermbg = 'none'
+    vim.api.nvim_set_hl(0, group, hl)
+  end
+end
+vim.api.nvim_create_autocmd('ColorScheme', { callback = transparent_bg })
+transparent_bg()
 
 -- Load machine-local overrides if present (colorscheme, etc.)
 pcall(require, 'local')
