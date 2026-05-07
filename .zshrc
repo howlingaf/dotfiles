@@ -28,6 +28,8 @@ plugins=(
 
 source $ZSH/oh-my-zsh.sh
 
+setopt PROMPT_SUBST
+
 GIT_BRANCH_MAXLEN=24
 git_prompt_info() {
   [[ "$(__git_prompt_git config --get oh-my-zsh.hide-info 2>/dev/null)" == "1" ]] && return
