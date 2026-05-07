@@ -28,6 +28,19 @@ plugins=(
 
 source $ZSH/oh-my-zsh.sh
 
+GIT_BRANCH_MAXLEN=24
+git_prompt_info() {
+  [[ "$(__git_prompt_git config --get oh-my-zsh.hide-info 2>/dev/null)" == "1" ]] && return
+  local ref
+  ref=$(__git_prompt_git symbolic-ref --short HEAD 2>/dev/null) \
+    || ref=$(__git_prompt_git rev-parse --short HEAD 2>/dev/null) \
+    || return 0
+  if (( ${#ref} > GIT_BRANCH_MAXLEN )); then
+    ref="${ref[1,GIT_BRANCH_MAXLEN]}…"
+  fi
+  echo "${ZSH_THEME_GIT_PROMPT_PREFIX}${ref}$(parse_git_dirty)${ZSH_THEME_GIT_PROMPT_SUFFIX}"
+}
+
 eval "$(zoxide init zsh)"
 
 bindkey -v
