@@ -20,6 +20,12 @@ _zsh_plugin_install zsh-vim-mode           https://github.com/softmoth/zsh-vim-m
 
 ZSH_THEME="robbyrussell"
 
+eval "$(zoxide init zsh)"
+
+# Disable Ctrl-Z suspend at the TTY level so it doesn't fire when we're
+# outside tmux (C-z is our tmux prefix). Use `kill -STOP <pid>` if needed.
+stty susp undef 2>/dev/null
+
 plugins=(
   zsh-autosuggestions
   zsh-vim-mode
@@ -42,8 +48,6 @@ git_prompt_info() {
   fi
   echo "${ZSH_THEME_GIT_PROMPT_PREFIX}${ref}$(parse_git_dirty)${ZSH_THEME_GIT_PROMPT_SUFFIX}"
 }
-
-eval "$(zoxide init zsh)"
 
 bindkey -v
 bindkey -M viins 'jk' vi-cmd-mode
@@ -108,12 +112,6 @@ launch_nvim(){
 bind '^A' fzf_cd_history
 bind '^S' fzf_edit_history
 bind '^N' launch_nvim
-
-
-foo (){
-  echo "hi"
-}
-
 
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl

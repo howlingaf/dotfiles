@@ -83,9 +83,11 @@ vim.opt.clipboard = 'unnamedplus'
 
 vim.keymap.set('n', '<leader>cr', function()
   local path = vim.fn.expand '%:p'
-  vim.fn.setreg('+', path)
-  print('Copied path to clipboard: ' .. path)
-end, { desc = 'Copy full path of current file to clipboard' })
+  local line = vim.api.nvim_win_get_cursor(0)[1]
+  local entry = path .. ':' .. line
+  vim.fn.setreg('+', entry)
+  print('Copied: ' .. entry)
+end, { desc = 'Copy full path:line of current file to clipboard' })
 
 vim.keymap.set('n', '<leader>rc', function()
   vim.cmd('tabedit ' .. vim.fn.expand '$HOME/.zshrc')
