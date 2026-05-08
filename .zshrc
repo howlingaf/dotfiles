@@ -5,6 +5,7 @@ export EDITOR="nvim"
 export VISUAL="nvim"
 
 setopt IGNORE_EOF
+setopt PROMPT_SUBST
 
 function _zsh_plugin_install() {
   local name=$1 repo=$2
@@ -28,8 +29,6 @@ plugins=(
 
 source $ZSH/oh-my-zsh.sh
 
-setopt PROMPT_SUBST
-
 GIT_BRANCH_MAXLEN=24
 git_prompt_info() {
   [[ "$(__git_prompt_git config --get oh-my-zsh.hide-info 2>/dev/null)" == "1" ]] && return
@@ -37,6 +36,7 @@ git_prompt_info() {
   ref=$(__git_prompt_git symbolic-ref --short HEAD 2>/dev/null) \
     || ref=$(__git_prompt_git rev-parse --short HEAD 2>/dev/null) \
     || return 0
+  ref="${ref#erwinb/}"
   if (( ${#ref} > GIT_BRANCH_MAXLEN )); then
     ref="${ref[1,GIT_BRANCH_MAXLEN]}…"
   fi
