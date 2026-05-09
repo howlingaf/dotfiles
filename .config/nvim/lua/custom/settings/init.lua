@@ -21,6 +21,7 @@ vim.opt.relativenumber = true -- Relative line numbers for easy movement.
 vim.g.have_nerd_font = false
 vim.opt.mouse = 'a' -- Enable mouse in all modes.
 vim.opt.showmode = false -- Don't show "-- INSERT --" since statusline usually does.
+vim.opt.cmdheight = 0 -- Collapse cmdline when idle so statusline sits flush with tmux.
 vim.opt.breakindent = true -- Preserve indent when wrapping lines.
 vim.opt.undofile = true -- Persistent undo between sessions.
 vim.opt.ignorecase = true -- Case-insensitive searching...
@@ -172,6 +173,30 @@ local function transparent_bg()
 end
 vim.api.nvim_create_autocmd('ColorScheme', { callback = transparent_bg })
 transparent_bg()
+
+-- mini.statusline — explicit fg/bg so mode badges and file info stay readable
+-- regardless of colorscheme. Without these, ModeNormal links to Cursor and
+-- ModeOther links to IncSearch, which often produces a tan blob with washed-out
+-- text on default schemes.
+local function statusline_hl()
+  local set = function(name, spec)
+    vim.api.nvim_set_hl(0, name, spec)
+  end
+  -- Mode badges (left edge + location segment on the right) — Tokyo Night Storm
+  set('MiniStatuslineModeNormal', { fg = '#1a1b26', bg = '#7aa2f7', bold = true })
+  set('MiniStatuslineModeInsert', { fg = '#1a1b26', bg = '#9ece6a', bold = true })
+  set('MiniStatuslineModeVisual', { fg = '#1a1b26', bg = '#bb9af7', bold = true })
+  set('MiniStatuslineModeReplace', { fg = '#1a1b26', bg = '#f7768e', bold = true })
+  set('MiniStatuslineModeCommand', { fg = '#1a1b26', bg = '#e0af68', bold = true })
+  set('MiniStatuslineModeOther', { fg = '#1a1b26', bg = '#7aa2f7', bold = true })
+  -- Surrounding segments
+  set('MiniStatuslineDevinfo', { fg = '#cdd6f4', bg = '#2a2837' })
+  set('MiniStatuslineFilename', { fg = '#cdd6f4', bg = 'none' })
+  set('MiniStatuslineFileinfo', { fg = '#cdd6f4', bg = '#2a2837' })
+  set('MiniStatuslineInactive', { fg = '#6e6a86', bg = 'none' })
+end
+vim.api.nvim_create_autocmd('ColorScheme', { callback = statusline_hl })
+statusline_hl()
 
 -- Load machine-local overrides if present (colorscheme, etc.)
 pcall(require, 'local')
