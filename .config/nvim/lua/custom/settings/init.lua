@@ -130,9 +130,18 @@ vim.keymap.set('n', '<leader>wr', ':set wrap!<CR>', { noremap = true, silent = t
 
 vim.keymap.set('n', '<leader><leader>', '<cmd>set rnu!<CR>', { desc = 'Toggle relative line numbers' })
 
-vim.keymap.set('n', '<leader>cl', function()
-  vim.fn.system "tmux split-window -h -c '#{pane_current_path}' 'claude -c'"
-end, { desc = 'Open Claude (continue) in tmux vertical split' })
+-- Window navigation: <C-h/j/k/l> for native nvim splits in normal mode, and
+-- the same keys in terminal mode (exit term mode then navigate). Replaces the
+-- vim-tmux-navigator setup since panes are now nvim-managed only.
+vim.keymap.set('n', '<C-h>', '<C-w>h', { silent = true, desc = 'Window: left' })
+vim.keymap.set('n', '<C-j>', '<C-w>j', { silent = true, desc = 'Window: down' })
+vim.keymap.set('n', '<C-k>', '<C-w>k', { silent = true, desc = 'Window: up' })
+vim.keymap.set('n', '<C-l>', '<C-w>l', { silent = true, desc = 'Window: right' })
+
+vim.keymap.set('t', '<C-h>', [[<C-\><C-n><cmd>wincmd h<cr>]], { silent = true })
+vim.keymap.set('t', '<C-j>', [[<C-\><C-n><cmd>wincmd j<cr>]], { silent = true })
+vim.keymap.set('t', '<C-k>', [[<C-\><C-n><cmd>wincmd k<cr>]], { silent = true })
+vim.keymap.set('t', '<C-l>', [[<C-\><C-n><cmd>wincmd l<cr>]], { silent = true })
 
 -- Highlight text momentarily after yanking.
 vim.api.nvim_create_autocmd('TextYankPost', {
