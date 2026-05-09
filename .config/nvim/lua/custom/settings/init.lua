@@ -107,7 +107,7 @@ vim.keymap.set('n', '<leader>rr', function()
 end, { noremap = true, silent = true })
 
 -- ----- Plugin-Specific Shortcuts -----
-vim.keymap.set('n', '<leader>c', ':CsvViewToggle<CR>', { noremap = true, silent = true }) -- Toggle CSV view plugin.
+vim.keymap.set('n', '<leader>cc', ':CsvViewToggle<CR>', { noremap = true, silent = true }) -- Toggle CSV view plugin.
 vim.opt.inccommand = 'split' -- Live preview for substitute (:%s).
 
 -- ----- Navigation Quality of Life -----

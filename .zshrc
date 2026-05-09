@@ -53,7 +53,7 @@ bindkey -v
 bindkey -M viins 'jk' vi-cmd-mode
 
 alias vi="nvim"
-alias nv="cd $HOME/.config/nvim/ && nvim ."
+alias nv="cd $HOME/.config/nvim/"
 alias vd="visidata"
 alias src=". $HOME/.zshrc && echo '.zshrc sourced'"
 alias rc="nvim $HOME/.zshrc ; . $HOME/.zshrc"
