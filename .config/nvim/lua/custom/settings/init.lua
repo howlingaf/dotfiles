@@ -106,6 +106,11 @@ vim.keymap.set('n', '<leader>rr', function()
   print 'Neovim config fully reloaded!'
 end, { noremap = true, silent = true })
 
+-- :Q (and :Q!) quits the entire nvim instance, not just the current window.
+vim.api.nvim_create_user_command('Q', function(opts)
+  vim.cmd(opts.bang and 'qall!' or 'qall')
+end, { bang = true, desc = 'Quit all windows (kill nvim)' })
+
 -- ----- Plugin-Specific Shortcuts -----
 vim.keymap.set('n', '<leader>cc', ':CsvViewToggle<CR>', { noremap = true, silent = true }) -- Toggle CSV view plugin.
 vim.opt.inccommand = 'split' -- Live preview for substitute (:%s).
