@@ -97,7 +97,7 @@ require('lazy').setup {
       'williamboman/mason-lspconfig.nvim',
       'WhoIsSethDaniel/mason-tool-installer.nvim',
       { 'j-hui/fidget.nvim', opts = {} },
-      'hrsh7th/cmp-nvim-lsp',
+      { 'hrsh7th/cmp-nvim-lsp', enabled = false }, -- disabled with nvim-cmp; flip to revert
     },
     config = function()
       -- Keymaps & UI on attach (unchanged)
@@ -146,11 +146,20 @@ require('lazy').setup {
               vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled { bufnr = event.buf })
             end, '[T]oggle Inlay [H]ints')
           end
+
+          if client and client:supports_method(vim.lsp.protocol.Methods.textDocument_completion) then
+            vim.lsp.completion.enable(true, client.id, event.buf, { autotrigger = true })
+          end
         end,
       })
 
-      -- Capabilities (for nvim-cmp)
-      local capabilities = vim.tbl_deep_extend('force', vim.lsp.protocol.make_client_capabilities(), require('cmp_nvim_lsp').default_capabilities())
+      vim.opt.completeopt = 'menu,menuone,noinsert,popup,fuzzy'
+
+      local capabilities = vim.lsp.protocol.make_client_capabilities()
+      local ok_cmp, cmp_nvim_lsp = pcall(require, 'cmp_nvim_lsp')
+      if ok_cmp then
+        capabilities = vim.tbl_deep_extend('force', capabilities, cmp_nvim_lsp.default_capabilities())
+      end
 
       -- Per-server config (add more servers here)
       local servers = {
@@ -358,6 +367,7 @@ require('lazy').setup {
   },
   {
     'hrsh7th/nvim-cmp',
+    enabled = false, -- trying native vim.lsp.completion; set true to revert
     event = 'InsertEnter',
     dependencies = {
       {
