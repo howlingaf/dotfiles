@@ -90,22 +90,37 @@ chpwd(){
 }
 
 fzf_edit_history(){
-  local file=$(tac ~/.edit_history | fzy)
-  if [[ -z "$file" ]]; then
-    return
-  fi
-  local dir=${file%/*}
-  cd "$dir"
-  nvim "$file"
+  local file
+  file=$(tac ~/.edit_history | while IFS= read -r f; do [[ -f $f ]] && print -r -- "$f"; done | fzy)
+  [[ -z "$file" ]] && return
+  cd "${file%/*}" && nvim "$file"
 }
 
 fzf_cd_history(){
-  local dir=$(tac ~/.cd_history | fzy)
+  local dir
+  dir=$(tac ~/.cd_history | while IFS= read -r d; do [[ -d $d ]] && print -r -- "$d"; done | fzy)
   [[ -n "$dir" ]] && cd "$dir"
 }
 
 launch_nvim(){
   nvim .
+}
+
+fzf_cmd_history(){
+  local cmd
+  cmd=$(fc -ln 1 | sed 's/^[[:space:]]\+//' | tac | awk '
+    !seen[$0]++ && NF>1 {
+      for (i=2; i<=NF; i++) if ($i !~ /^-/) { print; next }
+    }
+  ' | fzy) || return
+  [[ -z "$cmd" ]] && return
+  BUFFER="$cmd"
+  CURSOR=${#BUFFER}
+}
+
+dirmenu_select(){
+  local dest
+  dest=$(dirmenu) && [[ -n "$dest" ]] && cd "$dest"
 }
 
 
@@ -122,6 +137,8 @@ silent_bind(){
 silent_bind '^A' fzf_cd_history
 silent_bind '^S' fzf_edit_history
 silent_bind '^N' launch_nvim
+silent_bind '^F' dirmenu_select
+silent_bind '^D' fzf_cmd_history
 
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl
