@@ -109,9 +109,19 @@ launch_nvim(){
 }
 
 
-bind '^A' fzf_cd_history
-bind '^S' fzf_edit_history
-bind '^N' launch_nvim
+# Bind a key to run a function silently — no command name leaks onto the
+# prompt (which is what zsh-edit's `bind` does, since it simulates typing).
+# `zle -I` lets the inner command take over the terminal cleanly; the
+# `</dev/tty` ensures fzy reads keys even if ZLE has redirected stdin.
+silent_bind(){
+  local key="$1" cmd="$2" widget="__silent_$2"
+  functions[$widget]="zle -I; $cmd </dev/tty; zle reset-prompt"
+  zle -N "$widget"
+  bindkey "$key" "$widget"
+}
+silent_bind '^A' fzf_cd_history
+silent_bind '^S' fzf_edit_history
+silent_bind '^N' launch_nvim
 
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl
