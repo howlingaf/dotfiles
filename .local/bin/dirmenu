@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Vim-style directory browser. Writes the final directory to stdout.
+# Keys: j/k move, h parent, l/Enter into dir or open file in $EDITOR,
+#       gg top, G bottom, q quit (prints dir), Esc cancel (prints nothing).
+
+set -u
+
+# Result goes to original stdout; UI talks to the tty directly.
+exec 3>&1
+exec >/dev/tty 2>&1
+exec </dev/tty
+
+dir="${1:-$PWD}"
+dir="$(cd "$dir" && pwd)"
+cursor=0
+scroll=0
+entries=()
+
+load() {
+  entries=()
+  [[ "$dir" != "/" ]] && entries+=("..")
+  shopt -s nullglob
+  local items=("$dir"/*)
+  shopt -u nullglob
+  local names=() e n
+  for e in "${items[@]}"; do
+    n="${e##*/}"
+    [[ -d "$e" && ! -L "$e" ]] && n+="/"
+    names+=("$n")
+  done
+  if (( ${#names[@]} )); then
+    IFS=$'\n' names=($(printf '%s\n' "${names[@]}" | LC_ALL=C sort))
+    entries+=("${names[@]}")
+  fi
+  cursor=0
+  scroll=0
+}
+
+draw() {
+  local rows cols view i line
+  rows=$(tput lines); cols=$(tput cols)
+  view=$((rows - 2))
+  (( view < 1 )) && view=1
+  (( cursor < scroll )) && scroll=$cursor
+  (( cursor >= scroll + view )) && scroll=$((cursor - view + 1))
+  printf '\033[2J\033[H\033[1m%s\033[0m\n' "$dir"
+  for (( i=scroll; i < scroll+view && i < ${#entries[@]}; i++ )); do
+    line="${entries[i]}"
+    (( ${#line} > cols )) && line="${line:0:cols-1}"
+    if (( i == cursor )); then
+      printf '\033[7m%s\033[0m\n' "$line"
+    else
+      printf '%s\n' "$line"
+    fi
+  done
+}
+
+cleanup() { printf '\033[2J\033[H'; }
+trap cleanup EXIT
+
+load
+draw
+
+last_g=0
+sel=""
+while IFS= read -rsn1 key; do
+  case "$key" in
+    j) (( ${#entries[@]} > 0 && cursor < ${#entries[@]} - 1 )) && (( cursor++ )); last_g=0 ;;
+    k) (( cursor > 0 )) && (( cursor-- )); last_g=0 ;;
+    h) dir="$(dirname "$dir")"; load; last_g=0 ;;
+    l|"")
+      (( ${#entries[@]} == 0 )) && { last_g=0; continue; }
+      sel="${entries[cursor]}"
+      sel="${sel%/}"
+      if [[ "$sel" == ".." ]]; then
+        dir="$(dirname "$dir")"; load
+      elif [[ -d "$dir/$sel" ]]; then
+        dir="$dir/$sel"; load
+      elif [[ -e "$dir/$sel" ]]; then
+        printf '\033[2J\033[H'
+        "${EDITOR:-vi}" "$dir/$sel"
+      fi
+      last_g=0
+      ;;
+    G) (( ${#entries[@]} > 0 )) && cursor=$(( ${#entries[@]} - 1 )); last_g=0 ;;
+    g)
+      if (( last_g )); then cursor=0; last_g=0
+      else last_g=1; fi
+      ;;
+    q) printf '%s\n' "$dir" >&3; exit 0 ;;
+    $'\e') exit 1 ;;
+    *) last_g=0 ;;
+  esac
+  draw
+done
