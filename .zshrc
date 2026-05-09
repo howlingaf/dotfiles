@@ -7,10 +7,6 @@ export VISUAL="nvim"
 setopt IGNORE_EOF
 setopt PROMPT_SUBST
 
-# Pre-declare so a torn startup (Ctrl-C before zsh-vim-mode's first precmd)
-# doesn't flash the literal name in RPS1.
-typeset -g MODE_INDICATOR_PROMPT=''
-
 function _zsh_plugin_install() {
   local name=$1 repo=$2
   local dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/$name"
