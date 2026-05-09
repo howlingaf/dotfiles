@@ -360,7 +360,12 @@ require('lazy').setup {
     dependencies = { 'nvim-treesitter/nvim-treesitter', 'nvim-tree/nvim-web-devicons' },
     opts = {
       backends = { 'lsp', 'treesitter' },
-      layout = { default_direction = 'right', min_width = 40 },
+      layout = {
+        default_direction = 'right',
+        width = 0.25,
+        min_width = 0.25,
+        max_width = 0.25,
+      },
       show_guides = true,
       filter_kind = false,
     },
