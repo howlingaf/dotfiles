@@ -22,6 +22,7 @@ vim.g.have_nerd_font = false
 vim.opt.mouse = 'a' -- Enable mouse in all modes.
 vim.opt.showmode = false -- Don't show "-- INSERT --" since statusline usually does.
 vim.opt.cmdheight = 0 -- Collapse cmdline when idle so statusline sits flush with tmux.
+vim.opt.winborder = 'single' -- Default border for floats (LSP hover, signature, etc.)
 vim.opt.breakindent = true -- Preserve indent when wrapping lines.
 vim.opt.undofile = true -- Persistent undo between sessions.
 vim.opt.ignorecase = true -- Case-insensitive searching...
@@ -202,6 +203,14 @@ local function statusline_hl()
 end
 vim.api.nvim_create_autocmd('ColorScheme', { callback = statusline_hl })
 statusline_hl()
+
+-- Float borders: Tokyo Night blue so they read clearly against the
+-- transparent terminal background.
+local function float_border_hl()
+  vim.api.nvim_set_hl(0, 'FloatBorder', { fg = '#ffffff', bg = 'none' })
+end
+vim.api.nvim_create_autocmd('ColorScheme', { callback = float_border_hl })
+float_border_hl()
 
 -- Load machine-local overrides if present (colorscheme, etc.)
 pcall(require, 'local')
