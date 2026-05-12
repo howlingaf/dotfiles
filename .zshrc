@@ -22,10 +22,6 @@ ZSH_THEME="robbyrussell"
 
 eval "$(zoxide init zsh)"
 
-# Disable Ctrl-Z suspend at the TTY level so it doesn't fire when we're
-# outside tmux (C-z is our tmux prefix). Use `kill -STOP <pid>` if needed.
-stty susp undef 2>/dev/null
-
 plugins=(
   zsh-autosuggestions
   zsh-vim-mode
