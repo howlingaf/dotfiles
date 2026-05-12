@@ -103,6 +103,7 @@ do
       col = math.floor((vim.o.columns - w) / 2),
       border = 'single',
     })
+    vim.wo[term_win].scrolloff = 999
     if fresh or vim.bo[term_buf].buftype ~= 'terminal' then
       vim.fn.termopen(vim.o.shell)
       vim.cmd 'startinsert'
@@ -127,6 +128,53 @@ do
 
   vim.keymap.set({ 'n', 't' }, '<C-Space>', toggle_term, { desc = 'Toggle floating terminal' })
 end
+
+-- In a :terminal buffer, `gf` opens the file under cursor in the underlying
+-- non-floating window (so the floating terminal stays put). Parses optional
+-- trailing :LINE:COL.
+vim.api.nvim_create_autocmd('TermOpen', {
+  callback = function(ev)
+    vim.keymap.set('n', 'gf', function()
+      local line = vim.api.nvim_get_current_line()
+      local col = vim.api.nvim_win_get_cursor(0)[2] + 1
+      local s, e = col, col
+      while s > 1 and not line:sub(s - 1, s - 1):match('%s') do s = s - 1 end
+      while e <= #line and not line:sub(e, e):match('%s') do e = e + 1 end
+      local token = line:sub(s, e - 1)
+      token = token:gsub('^[%(%[%{\'"`]+', ''):gsub('[%)%]%}\'",;]+$', '')
+
+      local path, lnum, cnum = token:match('^(.-):(%d+):(%d+)$')
+      if not path then path, lnum = token:match('^(.-):(%d+)$') end
+      if not path then path = token end
+      lnum = tonumber(lnum)
+      cnum = tonumber(cnum)
+
+      if path:sub(1, 1) == '~' then path = vim.fn.expand(path) end
+      if path:sub(1, 1) ~= '/' then path = vim.fn.getcwd() .. '/' .. path end
+      path = vim.fn.fnamemodify(path, ':p')
+      if vim.fn.filereadable(path) ~= 1 then
+        vim.notify('Not a file: ' .. path, vim.log.levels.WARN)
+        return
+      end
+
+      local target
+      for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        if (vim.api.nvim_win_get_config(w).relative or '') == '' then
+          target = w
+          break
+        end
+      end
+      if target then vim.api.nvim_set_current_win(target) else vim.cmd 'wincmd p' end
+
+      vim.cmd('edit ' .. vim.fn.fnameescape(path))
+      if lnum then
+        pcall(vim.api.nvim_win_set_cursor, 0, { lnum, math.max(0, (cnum or 1) - 1) })
+        vim.cmd 'normal! zz'
+      end
+    end, { buffer = ev.buf, desc = 'Open file under cursor in main window' })
+    vim.keymap.set('n', 'gd', 'gf', { buffer = ev.buf, remap = true, desc = 'Alias of gf' })
+  end,
+})
 
 -- Reload files Claude (or anything else) edits on disk while open in nvim.
 vim.opt.autoread = true
