@@ -81,6 +81,33 @@ vim.api.nvim_create_autocmd('BufReadPost', {
 })
 
 vim.api.nvim_set_keymap('i', 'jk', '<Esc>', { noremap = true })
+
+-- Write-only OSC 52 clipboard. The default OSC 52 paste sends `\e]52;c;?` to
+-- query the terminal; on this setup the response leaks into whatever PTY is
+-- currently focused (e.g. the claude terminal buffer). Keep the outbound
+-- copy escape and cache yanks locally so paste never triggers a read.
+do
+  local osc52 = require('vim.ui.clipboard.osc52')
+  local cache = { ['+'] = { { '' }, 'v' }, ['*'] = { { '' }, 'v' } }
+  vim.g.clipboard = {
+    name = 'osc52-write-only',
+    copy = {
+      ['+'] = function(lines, regtype)
+        cache['+'] = { lines, regtype }
+        osc52.copy('+')(lines, regtype)
+      end,
+      ['*'] = function(lines, regtype)
+        cache['*'] = { lines, regtype }
+        osc52.copy('*')(lines, regtype)
+      end,
+    },
+    paste = {
+      ['+'] = function() return cache['+'][1], cache['+'][2] end,
+      ['*'] = function() return cache['*'][1], cache['*'][2] end,
+    },
+  }
+end
+
 vim.opt.clipboard = 'unnamedplus'
 
 vim.keymap.set('n', '<leader>cr', function()
