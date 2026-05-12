@@ -28,7 +28,7 @@ end
 
 local function toggle_claude()
   local was_open = find_claude_float() ~= nil
-  vim.cmd 'ClaudeCode'
+  vim.cmd 'ClaudeCode -r'
   if not was_open then
     -- Snacks runs additional layout passes after toggle returns; defer long
     -- enough to apply our geometry as the final word. Two passes catch cases
