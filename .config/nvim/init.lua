@@ -468,8 +468,7 @@ require('lazy').setup {
         return '%2l:%-2v'
       end
 
-      -- Match zshrc's GIT_BRANCH_MAXLEN (24 + ellipsis). Tmux currently uses
-      -- 20 with hard cut; harmonize there if you want exact parity.
+      -- Matches zshrc GIT_BRANCH_MAXLEN and tmux status-right (both 24 + ellipsis).
       local MAX_LEN = 24
       local function trunc_right(s)
         if vim.fn.strchars(s) <= MAX_LEN then return s end
