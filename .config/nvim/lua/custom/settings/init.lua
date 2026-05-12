@@ -81,32 +81,54 @@ vim.api.nvim_create_autocmd('BufReadPost', {
 })
 
 vim.api.nvim_set_keymap('i', 'jk', '<Esc>', { noremap = true })
+vim.keymap.set('t', 'jk', [[<C-\><C-n>]], { noremap = true })
 
--- Write-only OSC 52 clipboard. The default OSC 52 paste sends `\e]52;c;?` to
--- query the terminal; on this setup the response leaks into whatever PTY is
--- currently focused (e.g. the claude terminal buffer). Keep the outbound
--- copy escape and cache yanks locally so paste never triggers a read.
+-- Floating terminal toggle. Buffer persists across toggles; killed only when
+-- the shell `exit`s or the buffer is :bd!'d.
 do
-  local osc52 = require('vim.ui.clipboard.osc52')
-  local cache = { ['+'] = { { '' }, 'v' }, ['*'] = { { '' }, 'v' } }
-  vim.g.clipboard = {
-    name = 'osc52-write-only',
-    copy = {
-      ['+'] = function(lines, regtype)
-        cache['+'] = { lines, regtype }
-        osc52.copy('+')(lines, regtype)
-      end,
-      ['*'] = function(lines, regtype)
-        cache['*'] = { lines, regtype }
-        osc52.copy('*')(lines, regtype)
-      end,
-    },
-    paste = {
-      ['+'] = function() return cache['+'][1], cache['+'][2] end,
-      ['*'] = function() return cache['*'][1], cache['*'][2] end,
-    },
-  }
+  local term_buf, term_win
+
+  local function open_float()
+    local w = math.floor(vim.o.columns * 0.75)
+    local h = math.floor(vim.o.lines * 0.95)
+    if not (term_buf and vim.api.nvim_buf_is_valid(term_buf)) then
+      term_buf = vim.api.nvim_create_buf(false, true)
+    end
+    term_win = vim.api.nvim_open_win(term_buf, true, {
+      relative = 'editor',
+      width = w,
+      height = h,
+      row = math.floor((vim.o.lines - h) / 2),
+      col = math.floor((vim.o.columns - w) / 2),
+      border = 'single',
+    })
+    if vim.bo[term_buf].buftype ~= 'terminal' then
+      vim.fn.termopen(vim.o.shell)
+    end
+    vim.cmd 'startinsert'
+  end
+
+  local function toggle_term()
+    if term_win and vim.api.nvim_win_is_valid(term_win) then
+      vim.api.nvim_win_close(term_win, true)
+      term_win = nil
+    else
+      open_float()
+    end
+  end
+
+  vim.keymap.set({ 'n', 't' }, '<C-Space>', toggle_term, { desc = 'Toggle floating terminal' })
 end
+
+-- Reload files Claude (or anything else) edits on disk while open in nvim.
+vim.opt.autoread = true
+vim.api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI', 'FocusGained', 'BufEnter' }, {
+  callback = function()
+    if vim.fn.mode() ~= 'c' then
+      pcall(vim.cmd, 'checktime')
+    end
+  end,
+})
 
 vim.opt.clipboard = 'unnamedplus'
 
