@@ -85,49 +85,53 @@ vim.keymap.set('t', 'jk', [[<C-\><C-n>]], { noremap = true })
 
 -- Floating terminal toggle. Buffer persists across toggles; killed only when
 -- the shell `exit`s or the buffer is :bd!'d.
-do
-  local term_buf, term_win, last_pos, last_mode
+local Term = { buf = nil, win = nil, last_pos = nil, last_mode = nil }
 
-  local function open_float()
-    local w = math.floor(vim.o.columns * 0.75)
-    local h = math.floor(vim.o.lines * 0.95)
-    local fresh = not (term_buf and vim.api.nvim_buf_is_valid(term_buf))
-    if fresh then
-      term_buf = vim.api.nvim_create_buf(false, true)
-    end
-    term_win = vim.api.nvim_open_win(term_buf, true, {
-      relative = 'editor',
-      width = w,
-      height = h,
-      row = math.floor((vim.o.lines - h) / 2),
-      col = math.floor((vim.o.columns - w) / 2),
-      border = 'single',
-    })
-    vim.wo[term_win].scrolloff = 999
-    if fresh or vim.bo[term_buf].buftype ~= 'terminal' then
-      vim.fn.termopen(vim.o.shell)
-      vim.cmd 'startinsert'
-      return
-    end
-    if last_pos then
-      pcall(vim.api.nvim_win_set_cursor, term_win, last_pos)
-    end
-    if last_mode == 't' then vim.cmd 'startinsert' end
+function Term.open()
+  local w = math.floor(vim.o.columns * 0.75)
+  local h = math.floor(vim.o.lines * 0.95)
+  local fresh = not (Term.buf and vim.api.nvim_buf_is_valid(Term.buf))
+  if fresh then
+    Term.buf = vim.api.nvim_create_buf(false, true)
   end
-
-  local function toggle_term()
-    if term_win and vim.api.nvim_win_is_valid(term_win) then
-      last_pos = vim.api.nvim_win_get_cursor(term_win)
-      last_mode = vim.api.nvim_get_mode().mode == 't' and 't' or 'n'
-      vim.api.nvim_win_close(term_win, true)
-      term_win = nil
-    else
-      open_float()
-    end
+  Term.win = vim.api.nvim_open_win(Term.buf, true, {
+    relative = 'editor',
+    width = w,
+    height = h,
+    row = math.floor((vim.o.lines - h) / 2),
+    col = math.floor((vim.o.columns - w) / 2),
+    border = 'single',
+  })
+  vim.wo[Term.win].scrolloff = 999
+  if fresh or vim.bo[Term.buf].buftype ~= 'terminal' then
+    vim.fn.termopen(vim.o.shell)
+    vim.cmd 'startinsert'
+    return
   end
-
-  vim.keymap.set({ 'n', 't' }, '<C-Space>', toggle_term, { desc = 'Toggle floating terminal' })
+  if Term.last_pos then
+    pcall(vim.api.nvim_win_set_cursor, Term.win, Term.last_pos)
+  end
+  if Term.last_mode == 't' then vim.cmd 'startinsert' end
 end
+
+function Term.hide()
+  if Term.win and vim.api.nvim_win_is_valid(Term.win) then
+    Term.last_pos = vim.api.nvim_win_get_cursor(Term.win)
+    Term.last_mode = vim.api.nvim_get_mode().mode == 't' and 't' or 'n'
+    vim.api.nvim_win_close(Term.win, true)
+    Term.win = nil
+  end
+end
+
+function Term.toggle()
+  if Term.win and vim.api.nvim_win_is_valid(Term.win) then
+    Term.hide()
+  else
+    Term.open()
+  end
+end
+
+vim.keymap.set({ 'n', 't' }, '<C-Space>', Term.toggle, { desc = 'Toggle floating terminal' })
 
 -- In a :terminal buffer, `gf` opens the file under cursor in the underlying
 -- non-floating window (so the floating terminal stays put). Parses optional
@@ -164,7 +168,12 @@ vim.api.nvim_create_autocmd('TermOpen', {
           break
         end
       end
-      if target then vim.api.nvim_set_current_win(target) else vim.cmd 'wincmd p' end
+      Term.hide()
+      if target and vim.api.nvim_win_is_valid(target) then
+        vim.api.nvim_set_current_win(target)
+      else
+        vim.cmd 'wincmd p'
+      end
 
       vim.cmd('edit ' .. vim.fn.fnameescape(path))
       if lnum then
@@ -172,7 +181,6 @@ vim.api.nvim_create_autocmd('TermOpen', {
         vim.cmd 'normal! zz'
       end
     end, { buffer = ev.buf, desc = 'Open file under cursor in main window' })
-    vim.keymap.set('n', 'gd', 'gf', { buffer = ev.buf, remap = true, desc = 'Alias of gf' })
   end,
 })
 
