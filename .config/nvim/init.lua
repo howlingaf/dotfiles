@@ -463,12 +463,7 @@ require('lazy').setup {
       local statusline = require 'mini.statusline'
       statusline.setup { use_icons = vim.g.have_nerd_font }
 
-      ---@diagnostic disable-next-line: duplicate-set-field
-      statusline.section_location = function()
-        return '%2l:%-2v'
-      end
-
-      -- Matches zshrc GIT_BRANCH_MAXLEN and tmux status-right (both 24 + ellipsis).
+      -- Matches zshrc GIT_BRANCH_MAXLEN (24 + ellipsis).
       local MAX_LEN = 24
       local function trunc_right(s)
         if vim.fn.strchars(s) <= MAX_LEN then return s end
