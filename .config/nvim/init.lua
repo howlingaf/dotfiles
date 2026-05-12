@@ -467,6 +467,42 @@ require('lazy').setup {
       statusline.section_location = function()
         return '%2l:%-2v'
       end
+
+      -- Match zshrc's GIT_BRANCH_MAXLEN (24 + ellipsis). Tmux currently uses
+      -- 20 with hard cut; harmonize there if you want exact parity.
+      local MAX_LEN = 24
+      local function trunc_right(s)
+        if vim.fn.strchars(s) <= MAX_LEN then return s end
+        return vim.fn.strcharpart(s, 0, MAX_LEN) .. '…'
+      end
+      local function trunc_left(s)
+        local n = vim.fn.strchars(s)
+        if n <= MAX_LEN then return s end
+        return '…' .. vim.fn.strcharpart(s, n - MAX_LEN, MAX_LEN)
+      end
+
+      ---@diagnostic disable-next-line: duplicate-set-field
+      statusline.section_git = function(args)
+        if require('mini.statusline').is_truncated(args.trunc_width) then return '' end
+        local head = vim.b.minigit_summary_string or vim.b.gitsigns_head
+        if head == nil or head == '' then return '' end
+        return 'Git ' .. trunc_right(head)
+      end
+
+      ---@diagnostic disable-next-line: duplicate-set-field
+      statusline.section_filename = function()
+        if vim.bo.buftype == 'terminal' then return '%t' end
+        local full = vim.fn.expand '%:p'
+        if full == '' then return '%f%m%r' end
+        local root = vim.fs.root(0, '.git')
+        local rel
+        if root and full:sub(1, #root + 1) == root .. '/' then
+          rel = full:sub(#root + 2)
+        else
+          rel = vim.fn.fnamemodify(full, ':.')
+        end
+        return trunc_left(rel) .. '%m%r'
+      end
     end,
   },
   {
