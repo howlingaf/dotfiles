@@ -148,6 +148,7 @@ vim.api.nvim_create_autocmd('TermOpen', {
       token = token:gsub('^[%(%[%{\'"`]+', ''):gsub('[%)%]%}\'",;:]+$', '')
 
       local path, lnum, cnum = token:match('^(.-):(%d+):(%d+)$')
+      if not path then path, lnum = token:match('^(.-):(%d+)%-%d+$') end
       if not path then path, lnum = token:match('^(.-):(%d+)$') end
       if not path then path = token end
       lnum = tonumber(lnum)
