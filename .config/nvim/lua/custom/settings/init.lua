@@ -145,7 +145,7 @@ vim.api.nvim_create_autocmd('TermOpen', {
       while s > 1 and not line:sub(s - 1, s - 1):match('%s') do s = s - 1 end
       while e <= #line and not line:sub(e, e):match('%s') do e = e + 1 end
       local token = line:sub(s, e - 1)
-      token = token:gsub('^[%(%[%{\'"`]+', ''):gsub('[%)%]%}\'",;]+$', '')
+      token = token:gsub('^[%(%[%{\'"`]+', ''):gsub('[%)%]%}\'",;:]+$', '')
 
       local path, lnum, cnum = token:match('^(.-):(%d+):(%d+)$')
       if not path then path, lnum = token:match('^(.-):(%d+)$') end
