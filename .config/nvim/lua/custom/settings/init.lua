@@ -28,7 +28,6 @@ vim.opt.undofile = true -- Persistent undo between sessions.
 vim.opt.ignorecase = true -- Case-insensitive searching...
 vim.opt.smartcase = true -- ...unless capital letters are used.
 vim.opt.incsearch = true -- Show matches while typing.
-vim.opt.hlsearch = false -- Don't highlight matches after search ends.
 vim.opt.updatetime = 250 -- Faster diagnostics updates.
 vim.opt.timeoutlen = 300 -- Shorter mapping timeout.
 vim.opt.splitright = true -- Open vertical splits to the right.
@@ -85,7 +84,7 @@ vim.keymap.set('t', 'jk', [[<C-\><C-n>]], { noremap = true })
 
 -- Floating terminal toggle. Buffer persists across toggles; killed only when
 -- the shell `exit`s or the buffer is :bd!'d.
-local Term = { buf = nil, win = nil, last_pos = nil, last_mode = nil }
+local Term = { buf = nil, win = nil, last_view = nil, last_mode = nil }
 
 function Term.open()
   local w = math.floor(vim.o.columns * 0.75)
@@ -108,15 +107,21 @@ function Term.open()
     vim.cmd 'startinsert'
     return
   end
-  if Term.last_pos then
-    pcall(vim.api.nvim_win_set_cursor, Term.win, Term.last_pos)
+  vim.api.nvim_set_current_win(Term.win)
+  -- If caller was in insert in their buffer, vim auto-enters terminal-job
+  -- mode when focus lands on a terminal buffer, which auto-follows the
+  -- terminal cursor (bottom). Force terminal-normal before restoring view.
+  if Term.last_mode ~= 't' then vim.cmd 'stopinsert' end
+  if Term.last_view then
+    vim.fn.winrestview(Term.last_view)
   end
   if Term.last_mode == 't' then vim.cmd 'startinsert' end
 end
 
 function Term.hide()
   if Term.win and vim.api.nvim_win_is_valid(Term.win) then
-    Term.last_pos = vim.api.nvim_win_get_cursor(Term.win)
+    vim.api.nvim_set_current_win(Term.win)
+    Term.last_view = vim.fn.winsaveview()
     Term.last_mode = vim.api.nvim_get_mode().mode == 't' and 't' or 'n'
     vim.api.nvim_win_close(Term.win, true)
     Term.win = nil
@@ -125,13 +130,43 @@ end
 
 function Term.toggle()
   if Term.win and vim.api.nvim_win_is_valid(Term.win) then
+    local resume_insert = Term.caller_insert
+    local caller_win = Term.caller_win
+    local caller_pos = Term.caller_pos
     Term.hide()
+    if resume_insert then
+      vim.defer_fn(function()
+        if caller_win and vim.api.nvim_win_is_valid(caller_win) then
+          vim.api.nvim_set_current_win(caller_win)
+        end
+        if vim.bo.buftype ~= '' then return end
+        -- If saved cursor was past end-of-line (insert append), use startinsert!
+        -- so it lands after the last char without clamping.
+        local at_eol = false
+        if caller_pos then
+          local row, col = caller_pos[1], caller_pos[2]
+          local line = vim.api.nvim_buf_get_lines(0, row - 1, row, false)[1] or ''
+          at_eol = col >= #line
+          if not at_eol then
+            pcall(vim.api.nvim_win_set_cursor, 0, caller_pos)
+          else
+            pcall(vim.api.nvim_win_set_cursor, 0, { row, math.max(0, #line - 1) })
+          end
+        end
+        vim.cmd(at_eol and 'startinsert!' or 'startinsert')
+      end, 10)
+    end
   else
+    Term.caller_insert = vim.api.nvim_get_mode().mode:sub(1, 1) == 'i'
+    Term.caller_win = vim.api.nvim_get_current_win()
+    Term.caller_pos = vim.api.nvim_win_get_cursor(0)
     Term.open()
   end
 end
 
-vim.keymap.set({ 'n', 't' }, '<C-Space>', Term.toggle, { desc = 'Toggle floating terminal' })
+for _, key in ipairs { '<C-Space>', '<C-@>', '<NUL>' } do
+  vim.keymap.set({ 'n', 'i', 't' }, key, Term.toggle, { desc = 'Toggle floating terminal' })
+end
 
 -- In a :terminal buffer, `gf` opens the file under cursor in the underlying
 -- non-floating window (so the floating terminal stays put). Parses optional
