@@ -97,7 +97,7 @@ require('lazy').setup {
       'williamboman/mason-lspconfig.nvim',
       'WhoIsSethDaniel/mason-tool-installer.nvim',
       { 'j-hui/fidget.nvim', opts = {} },
-      { 'hrsh7th/cmp-nvim-lsp', enabled = false }, -- disabled with nvim-cmp; flip to revert
+      'hrsh7th/cmp-nvim-lsp',
     },
     config = function()
       -- Keymaps & UI on attach (unchanged)
@@ -147,13 +147,8 @@ require('lazy').setup {
             end, '[T]oggle Inlay [H]ints')
           end
 
-          if client and client:supports_method(vim.lsp.protocol.Methods.textDocument_completion) then
-            vim.lsp.completion.enable(true, client.id, event.buf, { autotrigger = true })
-          end
         end,
       })
-
-      vim.opt.completeopt = 'menu,menuone,noinsert,popup,fuzzy'
 
       local capabilities = vim.lsp.protocol.make_client_capabilities()
       local ok_cmp, cmp_nvim_lsp = pcall(require, 'cmp_nvim_lsp')
@@ -249,17 +244,16 @@ require('lazy').setup {
         },
       }
 
-      -- Merge optional servers into handlers (they'll work if manually installed)
-      local all_servers = vim.tbl_extend('force', {}, servers, optional_servers)
+      -- Register per-server config via the v2 API (mason-lspconfig dropped `handlers`).
+      -- `vim.lsp.config(name, opts)` stores the config; `automatic_enable` (default true)
+      -- in mason-lspconfig then calls `vim.lsp.enable(name)` for each installed server.
+      for name, opts in pairs(vim.tbl_extend('force', {}, servers, optional_servers)) do
+        vim.lsp.config(name, opts)
+      end
 
-      -- Mason setup and ensure tools are present
       require('mason').setup()
 
-      local ensure_installed = {}
-      for name, _ in pairs(servers) do
-        table.insert(ensure_installed, name)
-      end
-      -- Formatters/linters managed by mason-tool-installer
+      local ensure_installed = vim.tbl_keys(servers)
       vim.list_extend(ensure_installed, {
         'stylua',
         'eslint_d',
@@ -268,34 +262,11 @@ require('lazy').setup {
         'pylint',
         'ruff',
         'isort',
-        -- Optional formatters (uncomment if you have the toolchains):
-        -- 'gofumpt',      -- requires Go
-        -- 'goimports',    -- requires Go
-        -- 'clang-format', -- requires C++ toolchain
-        -- 'google-java-format', -- requires Java
       })
-
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
-      -- mason-lspconfig: install LSPs and (optionally) auto-enable them
       require('mason-lspconfig').setup {
         ensure_installed = { 'lua_ls', 'rust_analyzer', 'ts_ls', 'pyright' },
-        -- Optional: Install these only if you need them (requires Go, C++ toolchain, Java SDK)
-        -- Add 'gopls', 'clangd', 'jdtls' to ensure_installed if needed
-        handlers = {
-          -- Default handler - will setup all servers with defaults
-          function(server_name)
-            -- Check both servers and optional_servers for custom config
-            if all_servers[server_name] then
-              require('lspconfig')[server_name].setup(all_servers[server_name])
-            else
-              -- Otherwise, setup with just capabilities
-              require('lspconfig')[server_name].setup {
-                capabilities = capabilities,
-              }
-            end
-          end,
-        },
       }
     end,
   },
@@ -372,7 +343,6 @@ require('lazy').setup {
   },
   {
     'hrsh7th/nvim-cmp',
-    enabled = false, -- trying native vim.lsp.completion; set true to revert
     event = 'InsertEnter',
     dependencies = {
       {
@@ -419,7 +389,6 @@ require('lazy').setup {
           ['<C-f>'] = cmp.mapping.scroll_docs(4),
           ['<C-y>'] = cmp.mapping.confirm { select = true },
 
-          ['<C-Space>'] = cmp.mapping.complete {},
           ['<Tab>'] = cmp.mapping(function(fallback)
             if cmp.visible() then
               cmp.select_next_item()
@@ -461,7 +430,31 @@ require('lazy').setup {
       require('mini.surround').setup()
 
       local statusline = require 'mini.statusline'
-      statusline.setup { use_icons = vim.g.have_nerd_font }
+      statusline.setup {
+        use_icons = vim.g.have_nerd_font,
+        content = {
+          active = function()
+            local mode, mode_hl = statusline.section_mode { trunc_width = 120 }
+            local git = statusline.section_git { trunc_width = 75 }
+            local diff = statusline.section_diff { trunc_width = 75 }
+            local diag = statusline.section_diagnostics { trunc_width = 75 }
+            local lsp = statusline.section_lsp { trunc_width = 75 }
+            local filename = statusline.section_filename { trunc_width = 140 }
+            local fileinfo = statusline.section_fileinfo { trunc_width = 120 }
+            local location = statusline.section_location { trunc_width = 75 }
+            local search = statusline.section_searchcount { trunc_width = 75 }
+            return statusline.combine_groups {
+              { hl = mode_hl, strings = { mode } },
+              { hl = 'MiniStatuslineFilename', strings = { filename } },
+              '%<',
+              { hl = 'MiniStatuslineDevinfo', strings = { git, diff, diag, lsp } },
+              '%=',
+              { hl = 'MiniStatuslineFileinfo', strings = { fileinfo } },
+              { hl = mode_hl, strings = { search, location } },
+            }
+          end,
+        },
+      }
 
       -- Matches zshrc GIT_BRANCH_MAXLEN (24 + ellipsis).
       local MAX_LEN = 24
@@ -486,16 +479,7 @@ require('lazy').setup {
       ---@diagnostic disable-next-line: duplicate-set-field
       statusline.section_filename = function()
         if vim.bo.buftype == 'terminal' then return '%t' end
-        local full = vim.fn.expand '%:p'
-        if full == '' then return '%f%m%r' end
-        local root = vim.fs.root(0, '.git')
-        local rel
-        if root and full:sub(1, #root + 1) == root .. '/' then
-          rel = full:sub(#root + 2)
-        else
-          rel = vim.fn.fnamemodify(full, ':.')
-        end
-        return trunc_left(rel) .. '%m%r'
+        return '%t%m%r'
       end
     end,
   },

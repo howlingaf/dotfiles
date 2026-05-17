@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-# Vim-style directory browser. Writes the final directory to stdout.
-# Keys: j/k move, h parent, l/Enter into dir or open file in $EDITOR,
-#       gg top, G bottom, q quit (prints dir), Esc cancel (prints nothing).
-
 set -u
 
-# Result goes to original stdout; UI talks to the tty directly.
 exec 3>&1
 exec >/dev/tty 2>&1
 exec </dev/tty
