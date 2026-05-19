@@ -97,7 +97,7 @@ require('lazy').setup {
       'williamboman/mason-lspconfig.nvim',
       'WhoIsSethDaniel/mason-tool-installer.nvim',
       { 'j-hui/fidget.nvim', opts = {} },
-      'hrsh7th/cmp-nvim-lsp',
+      { 'hrsh7th/cmp-nvim-lsp', enabled = false },
     },
     config = function()
       -- Keymaps & UI on attach (unchanged)
@@ -146,7 +146,6 @@ require('lazy').setup {
               vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled { bufnr = event.buf })
             end, '[T]oggle Inlay [H]ints')
           end
-
         end,
       })
 
@@ -223,7 +222,7 @@ require('lazy').setup {
             '--clang-tidy',
             '--header-insertion=iwyu',
             '--completion-style=detailed',
-            '--function-arg-placeholders',
+            '--function-arg-placeholders=1',
           },
         },
         jdtls = {
@@ -459,26 +458,36 @@ require('lazy').setup {
       -- Matches zshrc GIT_BRANCH_MAXLEN (24 + ellipsis).
       local MAX_LEN = 24
       local function trunc_right(s)
-        if vim.fn.strchars(s) <= MAX_LEN then return s end
+        if vim.fn.strchars(s) <= MAX_LEN then
+          return s
+        end
         return vim.fn.strcharpart(s, 0, MAX_LEN) .. '…'
       end
       local function trunc_left(s)
         local n = vim.fn.strchars(s)
-        if n <= MAX_LEN then return s end
+        if n <= MAX_LEN then
+          return s
+        end
         return '…' .. vim.fn.strcharpart(s, n - MAX_LEN, MAX_LEN)
       end
 
       ---@diagnostic disable-next-line: duplicate-set-field
       statusline.section_git = function(args)
-        if require('mini.statusline').is_truncated(args.trunc_width) then return '' end
+        if require('mini.statusline').is_truncated(args.trunc_width) then
+          return ''
+        end
         local head = vim.b.minigit_summary_string or vim.b.gitsigns_head
-        if head == nil or head == '' then return '' end
+        if head == nil or head == '' then
+          return ''
+        end
         return 'Git ' .. trunc_right(head)
       end
 
       ---@diagnostic disable-next-line: duplicate-set-field
       statusline.section_filename = function()
-        if vim.bo.buftype == 'terminal' then return '%t' end
+        if vim.bo.buftype == 'terminal' then
+          return '%t'
+        end
         return '%t%m%r'
       end
     end,
@@ -489,11 +498,24 @@ require('lazy').setup {
     build = ':TSUpdate',
     event = { 'BufReadPre', 'BufNewFile' },
     config = function()
-      require('nvim-treesitter').install({
-        'bash', 'c', 'cpp', 'diff', 'html', 'lua', 'luadoc', 'query',
-        'vim', 'vimdoc', 'python', 'javascript', 'typescript', 'tsx',
-        'java', 'go',
-      })
+      require('nvim-treesitter').install {
+        'bash',
+        'c',
+        'cpp',
+        'diff',
+        'html',
+        'lua',
+        'luadoc',
+        'query',
+        'vim',
+        'vimdoc',
+        'python',
+        'javascript',
+        'typescript',
+        'tsx',
+        'java',
+        'go',
+      }
       vim.api.nvim_create_autocmd('FileType', {
         callback = function(ev)
           pcall(vim.treesitter.start, ev.buf)
