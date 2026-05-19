@@ -136,6 +136,13 @@ silent_bind '^N' launch_nvim
 silent_bind '^F' dirmenu_select
 silent_bind '^D' fzf_cmd_history
 
+# Pane title = cwd; bubbles up via tmux set-titles to outer terminal title bar.
+set-pane-title() {
+  print -Pn "\e]2;%d\a"
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd set-pane-title
+
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl
 [[ -f ~/.zshrc.linux ]] && source ~/.zshrc.linux

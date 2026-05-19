@@ -49,6 +49,8 @@ vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣' }
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 vim.opt.fileformat = 'unix'
 vim.opt.conceallevel = 1
+vim.opt.title = true -- Set terminal/pane title (OSC 2)...
+vim.opt.titlestring = '%F' -- ...to full path of current buffer.
 
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 vim.keymap.set('n', '<leader>r', vim.diagnostic.open_float, { desc = 'Open floating diagnostic message' })
