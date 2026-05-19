@@ -1,0 +1,28 @@
+[font]
+size = 28
+
+[font.normal]
+family = "Terminus (TTF) for Windows"
+style = "Medium"
+
+[font.bold]
+family = "Terminus (TTF) for Windows"
+style = "Bold"
+
+[font.italic]
+family = "Terminus (TTF) for Windows"
+style = "Italic"
+
+[font.bold_italic]
+family = "Terminus (TTF) for Windows"
+style = "Bold-Italic"
+
+[[keyboard.bindings]]
+key = "Space"
+mods = "Control"
+chars = "\u0000"
+
+[[keyboard.bindings]]
+key = "V"
+mods = "Control"
+action = "Paste"
