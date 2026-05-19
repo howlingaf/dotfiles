@@ -1,20 +1,22 @@
+import = [
+  "~/.config/alacritty/alacritty.mac.toml",
+  "~/.config/alacritty/alacritty.windows.toml",
+  "~/.config/alacritty/alacritty.linux.toml",
+]
+
 [font]
 size = 28
 
 [font.normal]
-family = "Terminus (TTF) for Windows"
 style = "Medium"
 
 [font.bold]
-family = "Terminus (TTF) for Windows"
 style = "Bold"
 
 [font.italic]
-family = "Terminus (TTF) for Windows"
 style = "Italic"
 
 [font.bold_italic]
-family = "Terminus (TTF) for Windows"
 style = "Bold-Italic"
 
 [[keyboard.bindings]]
