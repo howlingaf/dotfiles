@@ -147,3 +147,9 @@ add-zsh-hook precmd set-pane-title
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl
 [[ -f ~/.zshrc.linux ]] && source ~/.zshrc.linux
+
+if [[ -n "$SSH_TTY" ]]; then
+    PROMPT='%F{blue}[arch]%f '$PROMPT
+fi
+
+
