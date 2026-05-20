@@ -1,0 +1,31 @@
+[general]
+import = [
+  "~/.config/alacritty/alacritty.mac.toml",
+  "~/.config/alacritty/alacritty.windows.toml",
+  "~/.config/alacritty/alacritty.linux.toml",
+]
+
+[font]
+size = 28
+
+[font.normal]
+style = "Medium"
+
+[font.bold]
+style = "Bold"
+
+[font.italic]
+style = "Italic"
+
+[font.bold_italic]
+style = "Bold-Italic"
+
+[[keyboard.bindings]]
+key = "Space"
+mods = "Control"
+chars = "\u0000"
+
+[[keyboard.bindings]]
+key = "V"
+mods = "Control"
+action = "Paste"
