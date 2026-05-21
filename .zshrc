@@ -79,6 +79,21 @@ c() {
   claude -c "$@"
 }
 
+nvim() {
+  local root
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || { command nvim "$@"; return }
+  local -a args
+  local a
+  for a in "$@"; do
+    case "$a" in
+      -*) args+=("$a") ;;
+      *)  args+=("${a:A}") ;;
+    esac
+  done
+  cd "$root"
+  command nvim "${args[@]}"
+}
+
 
 chpwd(){
     local tmp=$(grep -v "^$OLDPWD$" ~/.cd_history)
@@ -100,7 +115,7 @@ fzf_cd_history(){
 }
 
 launch_nvim(){
-  nvim .
+  nvim
 }
 
 fzf_cmd_history(){
