@@ -88,6 +88,35 @@ vim.keymap.set('t', 'jk', [[<C-\><C-n>]], { noremap = true })
 -- the shell `exit`s or the buffer is :bd!'d.
 local Term = { buf = nil, win = nil, last_view = nil, last_mode = nil }
 
+-- Path the shell reads to learn what file/line/col the parent was on at the
+-- last toggle. Per-nvim-instance so multiple nvims don't clobber each other.
+local parent_state_path = (vim.fn.stdpath 'run' or '/tmp') .. '/nvim-term-parent-' .. vim.fn.getpid()
+
+local function write_parent_state()
+  if not Term.caller_file then return end
+  local fd = io.open(parent_state_path, 'w')
+  if not fd then return end
+  local line = Term.caller_pos and Term.caller_pos[1] or 0
+  local col = Term.caller_pos and (Term.caller_pos[2] + 1) or 0
+  fd:write(Term.caller_file .. '\n' .. line .. '\n' .. col .. '\n')
+  fd:close()
+end
+
+-- Keep the parent-state file live: refresh on cursor move / buffer switch in
+-- any real file buffer, so the shell sees the user's current position even
+-- while the floating terminal is open.
+vim.api.nvim_create_autocmd({ 'BufEnter', 'CursorMoved', 'CursorMovedI', 'InsertLeave' }, {
+  group = vim.api.nvim_create_augroup('TermParentState', { clear = true }),
+  callback = function(ev)
+    if vim.bo[ev.buf].buftype ~= '' then return end
+    local name = vim.api.nvim_buf_get_name(ev.buf)
+    if name == '' then return end
+    Term.caller_file = name
+    Term.caller_pos = vim.api.nvim_win_get_cursor(0)
+    write_parent_state()
+  end,
+})
+
 function Term.open()
   local w = math.floor(vim.o.columns * 0.75)
   local h = math.floor(vim.o.lines * 0.95)
@@ -105,7 +134,14 @@ function Term.open()
   })
   vim.wo[Term.win].scrolloff = 999
   if fresh or vim.bo[Term.buf].buftype ~= 'terminal' then
-    vim.fn.termopen(vim.o.shell)
+    vim.fn.termopen(vim.o.shell, {
+      env = {
+        NVIM_PARENT_STATE = parent_state_path,
+        NVIM_PARENT_FILE = Term.caller_file or '',
+        NVIM_PARENT_LINE = tostring(Term.caller_pos and Term.caller_pos[1] or 0),
+        NVIM_PARENT_COL = tostring(Term.caller_pos and (Term.caller_pos[2] + 1) or 0),
+      },
+    })
     vim.cmd 'startinsert'
     return
   end
@@ -162,6 +198,8 @@ function Term.toggle()
     Term.caller_insert = vim.api.nvim_get_mode().mode:sub(1, 1) == 'i'
     Term.caller_win = vim.api.nvim_get_current_win()
     Term.caller_pos = vim.api.nvim_win_get_cursor(0)
+    Term.caller_file = vim.api.nvim_buf_get_name(0)
+    write_parent_state()
     Term.open()
   end
 end
