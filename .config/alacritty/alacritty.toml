@@ -1,9 +1,12 @@
 [general]
 import = [
-  "~/.config/alacritty/alacritty.mac.toml",
-  "~/.config/alacritty/alacritty.windows.toml",
-  "~/.config/alacritty/alacritty.linux.toml",
+  "alacritty.mac.toml",
+  "alacritty.windows.toml",
+  "alacritty.linux.toml",
 ]
+
+[colors.primary]
+background = "#000000"
 
 [font]
 size = 28
@@ -26,6 +29,16 @@ mods = "Control"
 chars = "\u0000"
 
 [[keyboard.bindings]]
+key = "Space"
+mods = "Control|Shift"
+chars = "\u0000"
+
+[[keyboard.bindings]]
 key = "V"
 mods = "Control"
 action = "Paste"
+
+[[keyboard.bindings]]
+key = "Space"
+mods = "Shift"
+chars = "\u001b[32;2u"
