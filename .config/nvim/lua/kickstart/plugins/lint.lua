@@ -7,11 +7,10 @@ return {
     -- Configure linters by filetype
     -- Note: ESLint requires .eslintrc config in your project root to work
     lint.linters_by_ft = {
-      javascript = { 'eslint_d' },
-      typescript = { 'eslint_d' },
-      javascriptreact = { 'eslint_d' },
-      typescriptreact = { 'eslint_d' },
-      python = { 'pylint' },
+      -- JS/TS linting is now handled live by the ESLint LSP (see init.lua),
+      -- inline as you type. eslint_d-on-save removed to avoid duplicates.
+      -- Python linting is now handled live by the ruff LSP (see init.lua),
+      -- which is faster and inline. pylint-on-save removed to avoid duplicates.
       -- lua = { 'luacheck' }, -- Disabled: lua_ls LSP provides better diagnostics
       -- markdown = { 'markdownlint' }, -- Optional: enable if needed
       -- go = { 'golangci-lint' }, -- Uncomment if you have Go installed
