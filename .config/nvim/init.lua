@@ -31,6 +31,9 @@ require('lazy').setup {
     keys = {
       { '<leader>sk', '<cmd>Telescope keymaps<cr>', desc = '[S]earch [K]eymaps' },
       { '<leader>sf', '<cmd>Telescope find_files<cr>', desc = '[S]earch [F]iles' },
+      -- Like <leader>sf but includes hidden dotfiles AND git-ignored files
+      -- (build dirs, etc.) -- a full "find everything" search on demand.
+      { '<leader>sF', '<cmd>Telescope find_files hidden=true no_ignore=true<cr>', desc = '[S]earch [F]iles (all, incl. hidden + ignored)' },
       { '<leader>ss', '<cmd>Telescope builtin<cr>', desc = '[S]earch [S]elect Telescope' },
       { '<leader>sw', '<cmd>Telescope grep_string<cr>', desc = '[S]earch current [W]ord' },
       { '<leader>sg', '<cmd>Telescope live_grep<cr>', desc = '[S]earch by [G]rep' },
@@ -97,7 +100,6 @@ require('lazy').setup {
       'williamboman/mason-lspconfig.nvim',
       'WhoIsSethDaniel/mason-tool-installer.nvim',
       { 'j-hui/fidget.nvim', opts = {} },
-      { 'hrsh7th/cmp-nvim-lsp', enabled = false },
     },
     config = function()
       -- Keymaps & UI on attach (unchanged)
@@ -108,6 +110,11 @@ require('lazy').setup {
             mode = mode or 'n'
             vim.keymap.set(mode, keys, func, { buffer = event.buf, desc = 'LSP: ' .. desc })
           end
+
+          -- Override the default `K` hover: servers collapse struct/class bodies
+          -- to `{}`, so show the full definition source inline instead (with a
+          -- hover fallback when there is no definition to peek).
+          map('K', require('custom.peek').peek_definition, 'Peek Definition (hover fallback)')
 
           map('gd', require('telescope.builtin').lsp_definitions, '[G]oto [D]efinition')
           map('gr', require('telescope.builtin').lsp_references, '[G]oto [R]eferences')
@@ -191,12 +198,26 @@ require('lazy').setup {
           settings = {
             python = {
               analysis = {
-                typeCheckingMode = 'basic',
+                typeCheckingMode = 'standard', -- 'basic' -> 'standard' for richer type diagnostics
                 autoSearchPaths = true,
                 useLibraryCodeForTypes = true,
               },
             },
+            -- Defer linting (unused imports, style, etc.) to the ruff LSP, which
+            -- does it live and faster. pyright stays the type checker.
+            pyright = {
+              disableOrganizeImports = true,
+            },
           },
+        },
+        -- ruff as a live LSP: inline lint squiggles + quick-fixes as you type,
+        -- the Python analog to clangd's --clang-tidy. Replaces the on-save pylint
+        -- pass (removed from nvim-lint). Hover is left to pyright to avoid dupes.
+        ruff = {
+          capabilities = capabilities,
+          on_attach = function(client)
+            client.server_capabilities.hoverProvider = false
+          end,
         },
       }
 
@@ -332,9 +353,10 @@ require('lazy').setup {
       backends = { 'lsp', 'treesitter' },
       layout = {
         default_direction = 'right',
-        width = 0.25,
-        min_width = 0.25,
-        max_width = 0.25,
+        -- Fixed panel width. Bump this one number to taste (columns, not px).
+        width = 38,
+        min_width = 38,
+        max_width = 38,
       },
       show_guides = true,
       filter_kind = false,
