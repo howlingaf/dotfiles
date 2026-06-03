@@ -176,6 +176,20 @@ require('lazy').setup {
         },
         ts_ls = {
           capabilities = capabilities,
+          -- ESLint (@typescript-eslint/no-unused-vars) owns "unused" reporting;
+          -- drop ts_ls's duplicate greyed-out hints (6133 unused local, 6196
+          -- unused declaration, 6192 all imports unused, 6138 unused property).
+          handlers = {
+            ['textDocument/publishDiagnostics'] = function(err, result, ctx, config)
+              if result and result.diagnostics then
+                local ignored = { [6133] = true, [6196] = true, [6192] = true, [6138] = true }
+                result.diagnostics = vim.tbl_filter(function(d)
+                  return not ignored[d.code]
+                end, result.diagnostics)
+              end
+              return vim.lsp.diagnostic.on_publish_diagnostics(err, result, ctx, config)
+            end,
+          },
           settings = {
             typescript = {
               inlayHints = {
@@ -201,6 +215,14 @@ require('lazy').setup {
                 typeCheckingMode = 'standard', -- 'basic' -> 'standard' for richer type diagnostics
                 autoSearchPaths = true,
                 useLibraryCodeForTypes = true,
+                -- Ruff owns "unused" reporting; silence pyright's duplicate
+                -- greyed-out "X is not accessed" hints.
+                diagnosticSeverityOverrides = {
+                  reportUnusedImport = 'none',
+                  reportUnusedVariable = 'none',
+                  reportUnusedClass = 'none',
+                  reportUnusedFunction = 'none',
+                },
               },
             },
             -- Defer linting (unused imports, style, etc.) to the ruff LSP, which
@@ -218,6 +240,13 @@ require('lazy').setup {
           on_attach = function(client)
             client.server_capabilities.hoverProvider = false
           end,
+        },
+        -- ESLint as a live LSP: inline lint squiggles + quick-fixes as you type,
+        -- the JS/TS analog to the ruff LSP. Only activates in projects that have
+        -- an ESLint config (.eslintrc / eslint.config.js); silent otherwise.
+        -- Replaces the on-save eslint_d pass (removed from nvim-lint).
+        eslint = {
+          capabilities = capabilities,
         },
       }
 
