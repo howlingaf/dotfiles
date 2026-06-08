@@ -275,7 +275,7 @@ Term = make_floating_term({ 'claude', '-c' }, {
 -- Breadcrumbs scratch notes: opens the .md file as a real buffer in a floating
 -- window of THIS nvim (no nested nvim, no PTY). Toggling preserves cursor view.
 local Breadcrumbs = (function()
-  local path = '/home/howlingfantods_/Vault/_BREADCRUMBS.md'
+  local path = vim.fn.expand '$HOME/Vault/_BREADCRUMBS.md'
   local B = { win = nil, last_view = nil }
 
   function B.toggle()
@@ -414,7 +414,7 @@ vim.keymap.set('n', '<leader>rc', function()
 end, { desc = 'Open ~/.zshrc' })
 
 vim.keymap.set('n', '<leader>bl', function()
-  vim.cmd('edit ' .. vim.fn.fnameescape '/home/howlingfantods_/Vault/_BREADCRUMBS.md')
+  vim.cmd('edit ' .. vim.fn.fnameescape(vim.fn.expand '$HOME/Vault/_BREADCRUMBS.md'))
 end, { desc = 'Open [B]readcrumbs file' })
 
 vim.keymap.set('n', '<leader>cd', ':cd %:p:h<CR>:pwd<CR>', { noremap = true, silent = true })
