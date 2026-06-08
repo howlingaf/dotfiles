@@ -95,6 +95,11 @@ require('lazy').setup {
   },
   {
     'neovim/nvim-lspconfig',
+    -- Defer the whole LSP stack (mason, lspconfig, cmp-nvim-lsp) until a real
+    -- file is opened, instead of loading on every launch. LSP still attaches
+    -- normally -- BufReadPre fires before the buffer is read, so clangd/pyright
+    -- etc. start as soon as you open code, just not when nvim opens to a dashboard.
+    event = { 'BufReadPre', 'BufNewFile' },
     dependencies = {
       { 'williamboman/mason.nvim', config = true }, -- must load before dependents
       'williamboman/mason-lspconfig.nvim',
@@ -111,10 +116,12 @@ require('lazy').setup {
             vim.keymap.set(mode, keys, func, { buffer = event.buf, desc = 'LSP: ' .. desc })
           end
 
-          -- Override the default `K` hover: servers collapse struct/class bodies
-          -- to `{}`, so show the full definition source inline instead (with a
-          -- hover fallback when there is no definition to peek).
-          map('K', require('custom.peek').peek_definition, 'Peek Definition (hover fallback)')
+          -- `K` is the standard LSP hover -- a compact tooltip with the matched
+          -- overload's signature (concrete types substituted) and doc comment,
+          -- like Visual Studio's Quick Info. `<leader>K` peeks the full source
+          -- definition inline (handy for browsing your own struct/class bodies).
+          map('K', vim.lsp.buf.hover, 'Hover (Quick Info)')
+          map('<leader>K', require('custom.peek').peek_definition, 'Peek Definition (source)')
 
           map('gd', require('telescope.builtin').lsp_definitions, '[G]oto [D]efinition')
           map('gr', require('telescope.builtin').lsp_references, '[G]oto [R]eferences')
@@ -383,9 +390,9 @@ require('lazy').setup {
       layout = {
         default_direction = 'right',
         -- Fixed panel width. Bump this one number to taste (columns, not px).
-        width = 38,
-        min_width = 38,
-        max_width = 38,
+        width = 28,
+        min_width = 28,
+        max_width = 28,
       },
       show_guides = true,
       filter_kind = false,
