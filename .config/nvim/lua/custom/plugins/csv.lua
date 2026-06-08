@@ -1,5 +1,9 @@
 return {
   'hat0uma/csvview.nvim',
+  -- Lazy-load on the CsvView commands (and the <leader>cc toggle in settings).
+  -- Previously `cmd` was nested inside `opts`, so it was passed to csvview as a
+  -- setting and did nothing -- the plugin loaded eagerly at startup.
+  cmd = { 'CsvViewEnable', 'CsvViewDisable', 'CsvViewToggle' },
   ---@module "csvview"
   ---@type CsvView.Options
   opts = {
