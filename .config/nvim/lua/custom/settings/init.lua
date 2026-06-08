@@ -310,6 +310,22 @@ end
 local ShellTerm = make_floating_term({ vim.o.shell })
 vim.keymap.set({ 'n', 'i', 't' }, '<S-Space>', ShellTerm.toggle, { desc = 'Toggle floating shell terminal' })
 
+-- Note: `K` (LSP hover) and `<leader>K` (definition peek) are mapped per-buffer
+-- on LspAttach in init.lua, so they only bind where an LSP is active.
+--
+-- Neutralize keyword-lookup (`keywordprg`, default `:Man`) in C/C++ buffers.
+-- cppman's integration and the default :Man handler open a man-page split for
+-- symbols like `size_t`; with `K` already bound to LSP hover that man page was
+-- leaking in *behind* the hover float. Empty keywordprg here so nothing but the
+-- hover ever appears, and the two are fully independent.
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'c', 'cpp', 'objc', 'objcpp' },
+  group = vim.api.nvim_create_augroup('NoManKeywordprg', { clear = true }),
+  callback = function(ev)
+    vim.bo[ev.buf].keywordprg = ''
+  end,
+})
+
 -- In a :terminal buffer, `gf` and `gd` resolve the token under the cursor
 -- (URL, or path with optional :LINE:COL) and open it in the underlying
 -- non-floating window — the floating terminal hides itself first. No LSP
@@ -478,6 +494,129 @@ vim.api.nvim_create_autocmd('TextYankPost', {
     vim.highlight.on_yank()
   end,
 })
+
+-- Shift+M: open cppman's interactive pager for the symbol under the cursor in
+-- a floating terminal. The symbol grab includes `::` qualifiers so std::vector
+-- resolves whole, not just `vector`. Close the pager (q) and the float closes.
+local function cppman_under_cursor()
+  local line = vim.api.nvim_get_current_line()
+  local col = vim.api.nvim_win_get_cursor(0)[2] + 1
+  -- Expand left/right over identifier chars plus ':' so std::vector is whole.
+  local s, e = col, col
+  local function is_sym(c) return c:match '[%w_:]' ~= nil end
+  while s > 1 and is_sym(line:sub(s - 1, s - 1)) do s = s - 1 end
+  while e <= #line and is_sym(line:sub(e, e)) do e = e + 1 end
+  local sym = line:sub(s, e - 1):gsub('^:+', ''):gsub(':+$', '')
+  if sym == '' then
+    vim.notify('No symbol under cursor', vim.log.levels.WARN)
+    return
+  end
+
+  -- cppman already renders to a man page; MANPAGER=cat emits it as text, col -bx
+  -- flattens the overstrike bold. Drop it into a :Man-style horizontal split so
+  -- it looks/scrolls/closes (q) exactly like the tidydoc and :Man buffers.
+  local width = math.min(100, vim.o.columns)
+  local out = vim.fn.systemlist {
+    'sh', '-c',
+    string.format('MANPAGER=cat MANWIDTH=%d cppman %s 2>/dev/null | col -bx', width, vim.fn.shellescape(sym)),
+  }
+  if vim.v.shell_error ~= 0 or #out == 0 then
+    vim.notify('cppman: nothing for "' .. sym .. '"', vim.log.levels.WARN)
+    return
+  end
+
+  vim.cmd 'botright new'
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, out)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].readonly = true
+  vim.bo[buf].buftype = 'nofile'
+  vim.bo[buf].bufhidden = 'wipe'
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = 'man'
+  vim.api.nvim_buf_set_name(buf, 'cppman://' .. sym)
+  local win = vim.api.nvim_get_current_win()
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = 'no'
+  vim.wo[win].list = false
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = buf, nowait = true, silent = true })
+end
+vim.keymap.set('n', '<S-m>', cppman_under_cursor, { desc = 'cppman docs for symbol under cursor' })
+
+-- <leader>td: open the clang-tidy doc page for the diagnostic on the cursor
+-- line, rendered as text in a read-only float via `w3m -dump`. The check name
+-- comes from the diagnostic's `code` field (clangd sets it, e.g.
+-- modernize-loop-convert); falls back to a [bracketed-name] in the message.
+local function tidydoc_under_cursor()
+  local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local diags = vim.diagnostic.get(0, { lnum = lnum })
+  local check
+  for _, d in ipairs(diags) do
+    local code = d.code
+    if type(code) == 'string' and code:match '^[%w]+%-' then
+      check = code
+      break
+    end
+    local m = d.message and d.message:match '%[([%w]+%-[%w%-]+)%]'
+    if m then
+      check = m
+      break
+    end
+  end
+  if not check then
+    vim.notify('No clang-tidy check found on this line', vim.log.levels.WARN)
+    return
+  end
+
+  local url = 'https://clang.llvm.org/extra/clang-tidy/checks/' .. check:gsub('%-', '/', 1) .. '.html'
+
+  -- Build a REAL man page and show it exactly like `:Man`: curl the HTML, pandoc
+  -- converts to roff (-t man), strip pandoc's ¶ anchors + thin-space escapes,
+  -- give it a clean .TH title, render with `man -l`, then `col -bx` flattens the
+  -- backspace-overstrike bold into plain text. The result goes into a horizontal
+  -- split scratch buffer with filetype=man — same look/scroll/q as :Man grep.
+  local width = math.min(100, vim.o.columns)
+  local sh = string.format(
+    "curl -fsSL --compressed %s "
+      .. "| pandoc -f html -t man "
+      .. "| sed -e 's/¶//g' -e 's/\\\\[|]/ /g' "
+      .. "| { printf '.TH \"%s\" \"clang-tidy\" \"\" \"\" \"\"\\n'; cat; } "
+      .. "| MANWIDTH=%d man -l - "
+      .. "| col -bx",
+    vim.fn.shellescape(url),
+    check,
+    width
+  )
+
+  local out = vim.fn.systemlist { 'sh', '-c', sh }
+  if vim.v.shell_error ~= 0 or #out == 0 then
+    vim.notify('tidydoc: failed to render ' .. check, vim.log.levels.WARN)
+    return
+  end
+
+  -- Horizontal split with a man-style scratch buffer, mirroring :Man.
+  vim.cmd 'botright new'
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, out)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].readonly = true
+  vim.bo[buf].buftype = 'nofile'
+  vim.bo[buf].bufhidden = 'wipe'
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = 'man'
+  vim.api.nvim_buf_set_name(buf, 'tidydoc://' .. check)
+  local win = vim.api.nvim_get_current_win()
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = 'no'
+  vim.wo[win].list = false
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+  -- `q` closes it (buffer-local, overrides the global `q`->`<nop>`).
+  vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = buf, nowait = true, silent = true })
+end
+vim.keymap.set('n', '<leader>td', tidydoc_under_cursor, { desc = 'clang-[t]idy [d]oc for diagnostic on line' })
 
 -- Load machine-local overrides if present (colorscheme, etc.)
 pcall(require, 'local')
