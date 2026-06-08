@@ -167,4 +167,15 @@ if [[ -n "$SSH_TTY" ]]; then
     PROMPT='%F{blue}[arch]%f '$PROMPT
 fi
 
+# tidydoc <check-name>: open a clang-tidy check's doc page in the terminal.
+# The URL is derived from the name by swapping the first '-' for '/', e.g.
+# modernize-loop-convert -> modernize/loop-convert.html
+tidydoc() {
+  if [[ -z "$1" ]]; then
+    echo "usage: tidydoc <check-name>   e.g. tidydoc modernize-loop-convert" >&2
+    return 1
+  fi
+  w3m "https://clang.llvm.org/extra/clang-tidy/checks/${1/-//}.html"
+}
+
 
