@@ -109,7 +109,49 @@ vim.api.nvim_create_autocmd('BufReadPost', {
 })
 
 vim.api.nvim_set_keymap('i', 'jk', '<Esc>', { noremap = true })
-vim.keymap.set('t', 'jk', [[<C-\><C-n>]], { noremap = true })
+
+-- Terminal-mode "vim" maps (jk escape, <C-h/j/k/l> window nav) intercept keys
+-- that shells and TUIs want for themselves. They're applied buffer-locally on
+-- TermOpen so <C-q> can toggle them per terminal, and a terminal can opt out
+-- at creation by setting vim.b.term_vim = false before termopen (the shell
+-- scratchpad float does this — it types like a plain terminal by default).
+-- The built-in <C-\><C-n> escape works regardless of the toggle state.
+local term_vim_maps = {}
+local function term_vim_map(lhs, rhs, opts)
+  table.insert(term_vim_maps, { lhs = lhs, rhs = rhs, opts = opts })
+end
+local function apply_term_vim(buf, on)
+  for _, m in ipairs(term_vim_maps) do
+    if on then
+      vim.keymap.set('t', m.lhs, m.rhs, vim.tbl_extend('force', m.opts, { buffer = buf }))
+    else
+      pcall(vim.keymap.del, 't', m.lhs, { buffer = buf })
+    end
+  end
+end
+vim.api.nvim_create_autocmd('TermOpen', {
+  group = vim.api.nvim_create_augroup('TermVimMaps', { clear = true }),
+  callback = function(ev)
+    if vim.b[ev.buf].term_vim == nil then
+      vim.b[ev.buf].term_vim = true
+    end
+    apply_term_vim(ev.buf, vim.b[ev.buf].term_vim)
+  end,
+})
+local function toggle_term_vim()
+  local buf = vim.api.nvim_get_current_buf()
+  if vim.bo[buf].buftype ~= 'terminal' then
+    vim.notify('Not a terminal buffer', vim.log.levels.WARN)
+    return
+  end
+  local on = not vim.b[buf].term_vim
+  vim.b[buf].term_vim = on
+  apply_term_vim(buf, on)
+  vim.notify('Terminal vim maps: ' .. (on and 'on' or 'off'))
+end
+vim.keymap.set({ 'n', 't' }, '<C-q>', toggle_term_vim, { desc = 'Toggle vim maps in this terminal' })
+
+term_vim_map('jk', [[<C-\><C-n>]], { noremap = true })
 
 -- Floating terminal toggles. Each instance has its own persistent buffer;
 -- killed only when its command `exit`s or the buffer is :bd!'d.
@@ -177,6 +219,9 @@ local function make_floating_term(cmd, opts)
     })
     vim.wo[T.win].scrolloff = 999
     if fresh or vim.bo[T.buf].buftype ~= 'terminal' then
+      if opts.term_vim == false then
+        vim.b[T.buf].term_vim = false
+      end
       if opts.env then
         vim.fn.termopen(cmd, { env = opts.env(T) })
       else
@@ -261,6 +306,7 @@ local function make_floating_term(cmd, opts)
 end
 
 Term = make_floating_term({ 'claude', '-c' }, {
+  term_vim = false,
   env = function(T)
     return {
       NVIM_PARENT_STATE = parent_state_path,
@@ -307,7 +353,7 @@ end)()
 for _, key in ipairs { '<C-Space>', '<C-@>', '<NUL>' } do
   vim.keymap.set({ 'n', 'i', 't' }, key, Term.toggle, { desc = 'Toggle floating Claude terminal' })
 end
-local ShellTerm = make_floating_term({ vim.o.shell })
+local ShellTerm = make_floating_term({ vim.o.shell }, { term_vim = false })
 vim.keymap.set({ 'n', 'i', 't' }, '<S-Space>', ShellTerm.toggle, { desc = 'Toggle floating shell terminal' })
 
 -- Note: `K` (LSP hover) and `<leader>K` (definition peek) are mapped per-buffer
@@ -481,10 +527,10 @@ vim.keymap.set('n', '<C-j>', '<C-w>j', { silent = true, desc = 'Window: down' })
 vim.keymap.set('n', '<C-k>', '<C-w>k', { silent = true, desc = 'Window: up' })
 vim.keymap.set('n', '<C-l>', '<C-w>l', { silent = true, desc = 'Window: right' })
 
-vim.keymap.set('t', '<C-h>', [[<C-\><C-n><cmd>wincmd h<cr>]], { silent = true })
-vim.keymap.set('t', '<C-j>', [[<C-\><C-n><cmd>wincmd j<cr>]], { silent = true })
-vim.keymap.set('t', '<C-k>', [[<C-\><C-n><cmd>wincmd k<cr>]], { silent = true })
-vim.keymap.set('t', '<C-l>', [[<C-\><C-n><cmd>wincmd l<cr>]], { silent = true })
+term_vim_map('<C-h>', [[<C-\><C-n><cmd>wincmd h<cr>]], { silent = true })
+term_vim_map('<C-j>', [[<C-\><C-n><cmd>wincmd j<cr>]], { silent = true })
+term_vim_map('<C-k>', [[<C-\><C-n><cmd>wincmd k<cr>]], { silent = true })
+term_vim_map('<C-l>', [[<C-\><C-n><cmd>wincmd l<cr>]], { silent = true })
 
 -- Highlight text momentarily after yanking.
 vim.api.nvim_create_autocmd('TextYankPost', {
