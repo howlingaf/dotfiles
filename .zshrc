@@ -163,8 +163,10 @@ add-zsh-hook precmd set-pane-title
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl
 [[ -f ~/.zshrc.linux ]] && source ~/.zshrc.linux
 
-if [[ -n "$SSH_TTY" ]]; then
-    PROMPT='%F{blue}[arch]%f '$PROMPT
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  PROMPT='%F{213}[mac]%f '$PROMPT
+elif [[ -n "$SSH_TTY" ]]; then
+  PROMPT='%F{blue}[arch]%f '$PROMPT
 fi
 
 # tidydoc <check-name>: open a clang-tidy check's doc page in the terminal.
@@ -177,5 +179,6 @@ tidydoc() {
   fi
   w3m "https://clang.llvm.org/extra/clang-tidy/checks/${1/-//}.html"
 }
+
 
 
