@@ -305,6 +305,25 @@ local function make_floating_term(cmd, opts)
   return T
 end
 
+-- A visible floating terminal covers most of the viewport, so there's no
+-- reason for focus to land on the editor windows behind it (mouse click,
+-- stray <C-w> nav). Bounce focus back to the float. Other floats (e.g.
+-- breadcrumbs) may still take focus; hide/swap paths are unaffected because
+-- they close the float before focus moves.
+vim.api.nvim_create_autocmd('WinEnter', {
+  group = vim.api.nvim_create_augroup('TermFloatFocus', { clear = true }),
+  callback = function()
+    local t = visible_floating_term()
+    if not t or t.win == vim.api.nvim_get_current_win() then return end
+    if vim.api.nvim_win_get_config(0).relative ~= '' then return end
+    vim.schedule(function()
+      if t.win and vim.api.nvim_win_is_valid(t.win) then
+        vim.api.nvim_set_current_win(t.win)
+      end
+    end)
+  end,
+})
+
 Term = make_floating_term({ 'claude', '-c' }, {
   term_vim = false,
   env = function(T)
