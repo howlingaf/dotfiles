@@ -464,6 +464,12 @@ vim.api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI', 'FocusGained', 'BufEn
   end,
 })
 
+-- Over SSH, force OSC 52 so yanks land on the local machine's clipboard.
+-- Without this a remote host with its own clipboard tool (pbcopy on the mac)
+-- wins provider detection and yanks get stranded in that machine's clipboard.
+if vim.env.SSH_TTY then
+  vim.g.clipboard = 'osc52'
+end
 vim.opt.clipboard = 'unnamedplus'
 
 vim.keymap.set('n', '<leader>cr', function()
