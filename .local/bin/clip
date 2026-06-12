@@ -1,0 +1,11 @@
+#!/bin/sh
+# clip: copy stdin to the clipboard of the terminal you're physically at,
+# via OSC 52. Survives any ssh/tmux nesting — tmux forwards it upstream
+# (set-clipboard on) and the escape rides each ssh tty back to the outermost
+# terminal emulator, which sets the local system clipboard.
+# Usage: echo hi | clip;  cat file | clip
+data=$(base64 | tr -d '\n')
+seq=$(printf '\033]52;c;%s\a' "$data")
+# Write to the controlling tty so it works when stdout is piped; fall back
+# to stdout when there is no tty (e.g. invoked from a non-interactive shell).
+printf %s "$seq" 2>/dev/null > /dev/tty || printf %s "$seq"
