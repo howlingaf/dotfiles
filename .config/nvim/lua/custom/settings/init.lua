@@ -689,5 +689,33 @@ local function tidydoc_under_cursor()
 end
 vim.keymap.set('n', '<leader>td', tidydoc_under_cursor, { desc = 'clang-[t]idy [d]oc for diagnostic on line' })
 
+-- Sticky full path at the top of each buffer (winbar), relative to the repo root.
+local function winbar_path()
+  local full = vim.api.nvim_buf_get_name(0)
+  if full == '' then return '' end
+  full = vim.fn.fnamemodify(full, ':p')
+  local root = vim.fs.root(full, '.git')
+  local rel
+  if root then
+    rel = full:sub(#root + 2)
+  else
+    rel = vim.fn.fnamemodify(full, ':~:.')
+  end
+  rel = rel:gsub('%%', '%%%%') -- escape % so paths don't break the format string
+  return '  ' .. rel
+end
+
+vim.api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'BufFilePost' }, {
+  desc = 'Show repo-relative path in the winbar',
+  group = vim.api.nvim_create_augroup('StickyPathWinbar', { clear = true }),
+  callback = function(ev)
+    local win = vim.api.nvim_get_current_win()
+    if vim.api.nvim_win_get_config(win).relative ~= '' then return end -- skip floats
+    if vim.bo[ev.buf].buftype ~= '' then return end -- skip terminal/help/nofile/qf
+    if vim.api.nvim_buf_get_name(ev.buf) == '' then return end -- skip unnamed
+    vim.wo[win].winbar = winbar_path()
+  end,
+})
+
 -- Load machine-local overrides if present (colorscheme, etc.)
 pcall(require, 'local')

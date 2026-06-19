@@ -102,8 +102,14 @@ chpwd(){
 }
 
 fzf_edit_history(){
-  local file
-  file=$(tac ~/.edit_history | while IFS= read -r f; do [[ -f $f ]] && print -r -- "$f"; done | fzy)
+  local file root
+  # Inside a git repo, only offer files from that repo; otherwise the full list.
+  root=$(git rev-parse --show-toplevel 2>/dev/null)
+  file=$(tac ~/.edit_history | while IFS= read -r f; do
+    [[ -f $f ]] || continue
+    [[ -n $root && $f != $root/* ]] && continue
+    print -r -- "$f"
+  done | fzy)
   [[ -z "$file" ]] && return
   cd "${file%/*}" && nvim "$file"
 }
@@ -159,6 +165,26 @@ set-pane-title() {
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd set-pane-title
 
+# Centre the prompt the way scrolloff=999 centres the nvim cursor: the prompt
+# starts at the top and can descend only to the vertical middle; past that,
+# output scrolls up and the prompt stays put. Works in any terminal that answers
+# a cursor-position query (DSR) -- essentially all of them, nvim's included.
+_center_prompt() {
+  emulate -L zsh
+  [[ -t 1 ]] || return              # only when stdout is a real terminal
+  local target=$(( LINES / 2 )) reply row
+  # Ask the terminal for the cursor row (DSR); it replies on the tty.
+  print -n "\e[6n" >/dev/tty
+  IFS= read -rs -t 0.3 -d R reply </dev/tty || return
+  reply=${reply#*$'\e['}            # strip the ESC[ prefix -> "row;col"
+  row=${reply%%;*}
+  [[ $row == <-> ]] || return       # bail unless it's a clean number
+  # Only act once the prompt would sit below the middle: scroll the screen up
+  # so the upcoming prompt lands exactly on the centre row.
+  (( row > target )) && print -n "\e[$(( row - target ))S\e[${target};1H" >/dev/tty
+}
+add-zsh-hook precmd _center_prompt
+
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl
 [[ -f ~/.zshrc.linux ]] && source ~/.zshrc.linux
@@ -182,3 +208,13 @@ tidydoc() {
 
 
 
+
+# rt: cd back to the root of the current git repo (worktree-aware).
+rt() {
+  local root
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+    echo "not in a git repo" >&2
+    return 1
+  }
+  cd "$root"
+}
