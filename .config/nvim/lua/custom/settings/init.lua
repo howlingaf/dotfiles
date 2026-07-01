@@ -396,36 +396,83 @@ vim.api.nvim_create_autocmd('FileType', {
 -- non-floating window — the floating terminal hides itself first. No LSP
 -- lookup happens here; the terminal buffer has no client.
 local function term_goto()
-  local line = vim.api.nvim_get_current_line()
+  local buf = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1]
   local col = vim.api.nvim_win_get_cursor(0)[2] + 1
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local line = lines[row]
+
+  -- A terminal hard-wraps long output across buffer lines with no separator, so
+  -- a path can be split across rows. The reliable wrap signal is that the source
+  -- line is full-width (filled to the window width); a shorter line ended for
+  -- real. The continuation may carry a leading margin -- shells wrap flush to
+  -- column 1, but a TUI like Claude indents every line -- so on each next/prev
+  -- line we skip leading whitespace before taking its content run. filereadable()
+  -- below still confirms the result and we fall back to the single-line token, so
+  -- non-wrapped output behaves exactly as before.
+  local width = vim.api.nvim_win_get_width(0)
+  local function full(l) return l ~= nil and #l >= width end
+
   local s, e = col, col
   while s > 1 and not line:sub(s - 1, s - 1):match '%s' do s = s - 1 end
   while e <= #line and not line:sub(e, e):match '%s' do e = e + 1 end
-  local token = line:sub(s, e - 1)
-  token = token:gsub('^[%(%[%{\'"`]+', ''):gsub('[%)%]%}\'",;:%.]+$', '')
+  local single = line:sub(s, e - 1)
 
-  if token:match '^https?://' or token:match '^www%.' then
-    local url = token
-    if not url:match '^https?://' then url = 'https://' .. url end
+  local joined = single
+  -- forward: token reaches the end of a full-width line -> the next line is a
+  -- wrap continuation; skip its leading margin and append its content run.
+  local r, endcol = row, e - 1
+  while endcol == #lines[r] and full(lines[r]) and lines[r + 1] do
+    local nxt = lines[r + 1]
+    local a = 1
+    while a <= #nxt and nxt:sub(a, a):match '%s' do a = a + 1 end
+    if a > #nxt then break end
+    local j = a
+    while j <= #nxt and nxt:sub(j, j):match '%S' do j = j + 1 end
+    joined = joined .. nxt:sub(a, j - 1)
+    r, endcol = r + 1, j - 1
+  end
+  -- backward: token sits at the content start of its line (only margin before
+  -- it) and the previous line is full-width -> prepend that line's content run.
+  local r2, tline, tstart = row, line, s
+  while full(lines[r2 - 1]) and tline:sub(1, tstart - 1):match '^%s*$' do
+    local prv = lines[r2 - 1]
+    local a = 1
+    while a <= #prv and prv:sub(a, a):match '%s' do a = a + 1 end
+    joined = prv:sub(a) .. joined
+    r2, tline, tstart = r2 - 1, prv, a
+  end
+
+  local stripped = single:gsub('^[%(%[%{\'"`]+', '')
+  if stripped:match '^https?://' or stripped:match '^www%.' then
+    local tok = joined:gsub('^[%(%[%{\'"`]+', ''):gsub('[%)%]%}\'",;:%.]+$', '')
+    local url = tok:match '^https?://' and tok or ('https://' .. tok)
     vim.fn.setreg('+', url)
     vim.notify('URL copied to clipboard: ' .. url, vim.log.levels.INFO)
     return
   end
 
-  local path, lnum, cnum = token:match '^(.-):(%d+):(%d+)$'
-  if not path then path, lnum = token:match '^(.-):(%d+)%-%d+$' end
-  if not path then path, lnum = token:match '^(.-):(%d+)$' end
-  if not path then path = token end
-  lnum = tonumber(lnum)
-  cnum = tonumber(cnum)
+  -- Resolve a token to a readable file (with optional :LINE:COL); nil if not.
+  local function classify(tok)
+    tok = tok:gsub('^[%(%[%{\'"`]+', ''):gsub('[%)%]%}\'",;:%.]+$', '')
+    local p, lnum, cnum = tok:match '^(.-):(%d+):(%d+)$'
+    if not p then p, lnum = tok:match '^(.-):(%d+)%-%d+$' end
+    if not p then p, lnum = tok:match '^(.-):(%d+)$' end
+    if not p then p = tok end
+    if p:sub(1, 1) == '~' then p = vim.fn.expand(p) end
+    if p:sub(1, 1) ~= '/' then p = vim.fn.getcwd() .. '/' .. p end
+    p = vim.fn.fnamemodify(p, ':p')
+    if vim.fn.filereadable(p) ~= 1 then return nil end
+    return { path = p, lnum = tonumber(lnum), cnum = tonumber(cnum) }
+  end
 
-  if path:sub(1, 1) == '~' then path = vim.fn.expand(path) end
-  if path:sub(1, 1) ~= '/' then path = vim.fn.getcwd() .. '/' .. path end
-  path = vim.fn.fnamemodify(path, ':p')
-  if vim.fn.filereadable(path) ~= 1 then
-    vim.notify('Not a file: ' .. path, vim.log.levels.WARN)
+  -- Prefer the stitched token; fall back to the single cursor line.
+  local res = classify(joined) or classify(single)
+  if not res then
+    vim.notify('Not a file: ' .. joined, vim.log.levels.WARN)
     return
   end
+  local path, lnum, cnum = res.path, res.lnum, res.cnum
 
   local target
   for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
