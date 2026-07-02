@@ -52,10 +52,7 @@ function M.open(buf)
   vim.wo[pin_win].relativenumber = false
   vim.wo[pin_win].wrap = false
   vim.wo[pin_win].winfixheight = true
-
-  if vim.fn.has("nvim-0.10") == 1 then
-    pcall(function() vim.wo[pin_win].winfixbuf = true end)
-  end
+  vim.wo[pin_win].winfixbuf = true
 
   vim.api.nvim_set_current_win(source_win)
 
@@ -66,13 +63,6 @@ end
 function M.resize(win)
   if not vim.api.nvim_win_is_valid(win) then return end
   vim.api.nvim_win_set_height(win, compute_height(vim.o.lines))
-end
-
----@param win integer|nil
-function M.close(win)
-  if win and vim.api.nvim_win_is_valid(win) then
-    pcall(vim.api.nvim_win_close, win, true)
-  end
 end
 
 return M

@@ -17,24 +17,6 @@
 
 local M = {}
 
--- Strip common leading indentation so a nested definition isn't pushed right.
-local function dedent(lines)
-  local min_indent = math.huge
-  for _, l in ipairs(lines) do
-    if l:match '%S' then
-      min_indent = math.min(min_indent, #(l:match '^%s*'))
-    end
-  end
-  if min_indent == math.huge or min_indent == 0 then
-    return lines
-  end
-  local out = {}
-  for i, l in ipairs(lines) do
-    out[i] = l:sub(min_indent + 1)
-  end
-  return out
-end
-
 -- Walk up from (row,col) to the nearest treesitter node that is a definition
 -- WITH A BODY. Returns the node, or nil if there's nothing worth showing inline
 -- (declaration-only, using-decl, variable, etc.). Returning nil is what makes
@@ -125,10 +107,10 @@ local function show_location_body(loc)
   if #lines == 0 then
     return false
   end
-  lines = dedent(lines)
+  -- Strip common leading indentation so a nested definition isn't pushed right.
+  lines = vim.split(vim.text.indent(0, table.concat(lines, '\n')), '\n')
 
   vim.lsp.util.open_floating_preview(lines, vim.bo[target_buf].filetype, {
-    border = 'single',
     max_width = 100,
     max_height = 30,
     focusable = true,

@@ -29,9 +29,6 @@ M.options = vim.deepcopy(M.defaults)
 function M.merge(user_opts)
   user_opts = user_opts or {}
   M.options = vim.tbl_deep_extend("force", vim.deepcopy(M.defaults), user_opts)
-  if user_opts.keymaps == false then
-    M.options.keymaps = false
-  end
   return M.options
 end
 

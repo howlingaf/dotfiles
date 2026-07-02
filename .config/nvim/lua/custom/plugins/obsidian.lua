@@ -1,7 +1,6 @@
 return {
   'epwalsh/obsidian.nvim',
   version = '*', -- use latest release instead of latest commit
-  lazy = true,
   -- Only load while editing markdown files inside the vault.
   event = {
     'BufReadPre ' .. vim.fn.expand '~' .. '/Vault/*.md',

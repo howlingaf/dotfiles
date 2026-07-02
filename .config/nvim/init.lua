@@ -10,12 +10,14 @@ if not (vim.uv or vim.loop).fs_stat(lazypath) then
 end ---@diagnostic disable-next-line: undefined-field
 vim.opt.rtp:prepend(lazypath)
 
+-- prettierd with prettier fallback, shared by all JS/TS filetypes in conform.
+local prettier = { 'prettierd', 'prettier', stop_after_first = true }
+
 require('lazy').setup {
   { 'tpope/vim-sleuth', event = 'BufReadPre' },
 
   {
     'nvim-telescope/telescope.nvim',
-    branch = 'master',
     cmd = 'Telescope',
     dependencies = {
       'nvim-lua/plenary.nvim',
@@ -67,13 +69,7 @@ require('lazy').setup {
         end,
         desc = '[S]earch [N]eovim files',
       },
-      {
-        '<leader>e',
-        function()
-          require('telescope.builtin').find_files { cwd = vim.fn.getcwd() }
-        end,
-        desc = 'Browse files in working directory',
-      },
+      { '<leader>e', '<cmd>Telescope find_files<cr>', desc = 'Browse files in working directory' },
     },
     config = function()
       require('telescope').setup {
@@ -169,35 +165,23 @@ require('lazy').setup {
         capabilities = vim.tbl_deep_extend('force', capabilities, cmp_nvim_lsp.default_capabilities())
       end
 
+      -- Capabilities for every server (merged into each per-server config below).
+      vim.lsp.config('*', { capabilities = capabilities })
+
       -- Per-server config (add more servers here)
       local servers = {
-        rust_analyzer = {
-          capabilities = capabilities,
-          settings = { ['rust-analyzer'] = {} },
-        },
+        rust_analyzer = {},
         lua_ls = {
-          capabilities = capabilities,
           settings = {
             Lua = { completion = { callSnippet = 'Replace' } },
           },
         },
         ts_ls = {
-          capabilities = capabilities,
-          -- ESLint (@typescript-eslint/no-unused-vars) owns "unused" reporting;
-          -- drop ts_ls's duplicate greyed-out hints (6133 unused local, 6196
-          -- unused declaration, 6192 all imports unused, 6138 unused property).
-          handlers = {
-            ['textDocument/publishDiagnostics'] = function(err, result, ctx, config)
-              if result and result.diagnostics then
-                local ignored = { [6133] = true, [6196] = true, [6192] = true, [6138] = true }
-                result.diagnostics = vim.tbl_filter(function(d)
-                  return not ignored[d.code]
-                end, result.diagnostics)
-              end
-              return vim.lsp.diagnostic.on_publish_diagnostics(err, result, ctx, config)
-            end,
-          },
           settings = {
+            -- ESLint (@typescript-eslint/no-unused-vars) owns "unused" reporting;
+            -- drop ts_ls's duplicate greyed-out hints (6133 unused local, 6196
+            -- unused declaration, 6192 all imports unused, 6138 unused property).
+            diagnostics = { ignoredCodes = { 6133, 6196, 6192, 6138 } },
             typescript = {
               inlayHints = {
                 includeInlayParameterNameHints = 'all',
@@ -215,7 +199,6 @@ require('lazy').setup {
           },
         },
         pyright = {
-          capabilities = capabilities,
           settings = {
             python = {
               analysis = {
@@ -243,7 +226,6 @@ require('lazy').setup {
         -- the Python analog to clangd's --clang-tidy. Replaces the on-save pylint
         -- pass (removed from nvim-lint). Hover is left to pyright to avoid dupes.
         ruff = {
-          capabilities = capabilities,
           on_attach = function(client)
             client.server_capabilities.hoverProvider = false
           end,
@@ -252,15 +234,12 @@ require('lazy').setup {
         -- the JS/TS analog to the ruff LSP. Only activates in projects that have
         -- an ESLint config (.eslintrc / eslint.config.js); silent otherwise.
         -- Replaces the on-save eslint_d pass (removed from nvim-lint).
-        eslint = {
-          capabilities = capabilities,
-        },
+        eslint = {},
       }
 
       -- Optional servers (automatically configured if manually installed via :MasonInstall)
       local optional_servers = {
         gopls = {
-          capabilities = capabilities,
           settings = {
             gopls = {
               analyses = {
@@ -272,7 +251,6 @@ require('lazy').setup {
           },
         },
         clangd = {
-          capabilities = capabilities,
           cmd = {
             'clangd',
             '--background-index',
@@ -283,7 +261,6 @@ require('lazy').setup {
           },
         },
         jdtls = {
-          capabilities = capabilities,
           settings = {
             java = {
               signatureHelp = { enabled = true },
@@ -312,18 +289,16 @@ require('lazy').setup {
       local ensure_installed = vim.tbl_keys(servers)
       vim.list_extend(ensure_installed, {
         'stylua',
-        'eslint_d',
         'prettier',
         'prettierd',
-        'pylint',
         'ruff',
         'isort',
       })
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
-      require('mason-lspconfig').setup {
-        ensure_installed = { 'lua_ls', 'rust_analyzer', 'ts_ls', 'pyright' },
-      }
+      -- mason-tool-installer installs everything above; mason-lspconfig just
+      -- needs to run so `automatic_enable` calls vim.lsp.enable() per server.
+      require('mason-lspconfig').setup {}
     end,
   },
   {
@@ -365,11 +340,13 @@ require('lazy').setup {
       },
       formatters_by_ft = {
         lua = { 'stylua' },
-        python = { 'isort', 'ruff' },
-        javascript = { 'prettierd', 'prettier', stop_after_first = true },
-        typescript = { 'prettierd', 'prettier', stop_after_first = true },
-        javascriptreact = { 'prettierd', 'prettier', stop_after_first = true },
-        typescriptreact = { 'prettierd', 'prettier', stop_after_first = true },
+        -- 'ruff' alone is a deprecated alias for ruff_fix (lint autofixes only);
+        -- ruff_format is the actual formatter.
+        python = { 'isort', 'ruff_format' },
+        javascript = prettier,
+        typescript = prettier,
+        javascriptreact = prettier,
+        typescriptreact = prettier,
         go = { 'gofumpt', 'goimports' },
         cpp = { 'clang-format' },
         c = { 'clang-format' },
@@ -487,16 +464,44 @@ require('lazy').setup {
       require('mini.surround').setup()
 
       local statusline = require 'mini.statusline'
+
+      -- Custom sections, called from content.active below instead of
+      -- monkeypatching mini's own section_* functions.
+      -- MAX_LEN follows zshrc's GIT_BRANCH_MAXLEN so both truncate alike.
+      local MAX_LEN = tonumber(vim.env.GIT_BRANCH_MAXLEN) or 24
+      local function trunc_right(s)
+        if vim.fn.strchars(s) <= MAX_LEN then
+          return s
+        end
+        return vim.fn.strcharpart(s, 0, MAX_LEN) .. '…'
+      end
+      local function section_git(args)
+        if statusline.is_truncated(args.trunc_width) then
+          return ''
+        end
+        local head = vim.b.minigit_summary_string or vim.b.gitsigns_head
+        if head == nil or head == '' then
+          return ''
+        end
+        return 'Git ' .. trunc_right(head)
+      end
+      local function section_filename()
+        if vim.bo.buftype == 'terminal' then
+          return '%t'
+        end
+        return '%t%m%r'
+      end
+
       statusline.setup {
         use_icons = vim.g.have_nerd_font,
         content = {
           active = function()
             local mode, mode_hl = statusline.section_mode { trunc_width = 120 }
-            local git = statusline.section_git { trunc_width = 75 }
+            local git = section_git { trunc_width = 75 }
             local diff = statusline.section_diff { trunc_width = 75 }
             local diag = statusline.section_diagnostics { trunc_width = 75 }
             local lsp = statusline.section_lsp { trunc_width = 75 }
-            local filename = statusline.section_filename { trunc_width = 140 }
+            local filename = section_filename()
             local fileinfo = statusline.section_fileinfo { trunc_width = 120 }
             local location = statusline.section_location { trunc_width = 75 }
             local search = statusline.section_searchcount { trunc_width = 75 }
@@ -512,42 +517,6 @@ require('lazy').setup {
           end,
         },
       }
-
-      -- Matches zshrc GIT_BRANCH_MAXLEN (24 + ellipsis).
-      local MAX_LEN = 24
-      local function trunc_right(s)
-        if vim.fn.strchars(s) <= MAX_LEN then
-          return s
-        end
-        return vim.fn.strcharpart(s, 0, MAX_LEN) .. '…'
-      end
-      local function trunc_left(s)
-        local n = vim.fn.strchars(s)
-        if n <= MAX_LEN then
-          return s
-        end
-        return '…' .. vim.fn.strcharpart(s, n - MAX_LEN, MAX_LEN)
-      end
-
-      ---@diagnostic disable-next-line: duplicate-set-field
-      statusline.section_git = function(args)
-        if require('mini.statusline').is_truncated(args.trunc_width) then
-          return ''
-        end
-        local head = vim.b.minigit_summary_string or vim.b.gitsigns_head
-        if head == nil or head == '' then
-          return ''
-        end
-        return 'Git ' .. trunc_right(head)
-      end
-
-      ---@diagnostic disable-next-line: duplicate-set-field
-      statusline.section_filename = function()
-        if vim.bo.buftype == 'terminal' then
-          return '%t'
-        end
-        return '%t%m%r'
-      end
     end,
   },
   {
@@ -576,7 +545,12 @@ require('lazy').setup {
       }
       vim.api.nvim_create_autocmd('FileType', {
         callback = function(ev)
-          pcall(vim.treesitter.start, ev.buf)
+          -- Only start for filetypes with an installed parser, so real
+          -- highlighter errors aren't swallowed by a blanket pcall.
+          local lang = vim.treesitter.language.get_lang(ev.match)
+          if lang and vim.treesitter.language.add(lang) then
+            vim.treesitter.start(ev.buf, lang)
+          end
         end,
       })
     end,
@@ -588,5 +562,4 @@ require('lazy').setup {
   require 'kickstart.plugins.gitsigns',
 
   { import = 'custom.plugins' },
-  { import = 'custom.plugins.csv' },
 }
