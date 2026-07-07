@@ -2,8 +2,8 @@ export ZSH="$HOME/.oh-my-zsh"
 export PATH="$HOME/.cargo/bin:$PATH"
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/.local/share/nvim/mason/bin:$PATH"
-export EDITOR="nvim"
-export VISUAL="nvim"
+export EDITOR="~/.config/vim-classic/bin/cvim"
+export VISUAL="~/.config/vim-classic/bin/cvim"
 
 setopt IGNORE_EOF
 setopt PROMPT_SUBST
@@ -49,11 +49,11 @@ git_prompt_info() {
 bindkey -v
 bindkey -M viins 'jk' vi-cmd-mode
 
-alias vi="nvim"
-alias nv="cd $HOME/.config/nvim/"
+alias vi="~/.config/vim-classic/bin/cvim"
+alias nv="cd ~/.config/vim-classic"
 alias vd="visidata"
 alias src=". $HOME/.zshrc && echo '.zshrc sourced'"
-alias rc="nvim $HOME/.zshrc ; . $HOME/.zshrc"
+alias rc="~/.config/vim-classic/bin/cvim $HOME/.zshrc ; . $HOME/.zshrc"
 alias dg='git --git-dir=$HOME/.dotfiles --work-tree=$HOME'
 unalias cl cr c 2>/dev/null
 
@@ -111,7 +111,7 @@ fzf_edit_history(){
     print -r -- "$f"
   done | fzy)
   [[ -z "$file" ]] && return
-  cd "${file%/*}" && nvim "$file"
+  cd "${file%/*}" && ~/.config/vim-classic/bin/cvim "$file"
 }
 
 fzf_cd_history(){
@@ -121,7 +121,7 @@ fzf_cd_history(){
 }
 
 launch_nvim(){
-  nvim
+  ~/.config/vim-classic/bin/cvim
 }
 
 fzf_cmd_history(){

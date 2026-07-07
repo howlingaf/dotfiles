@@ -542,8 +542,8 @@ vim.keymap.set('n', 'gf', function()
 end, { desc = 'gf: open URL or file under cursor' })
 
 -- Re-source the config. Purges this config's own modules so `require` re-runs
--- them; note lazy.setup can't be re-run, and autocmd-captured closures need a
--- full restart to pick up edits (see memory note) -- this is best-effort.
+-- them; re-running vim.pack.add() is a no-op, and autocmd-captured closures
+-- need a full restart to pick up edits (see memory note) -- this is best-effort.
 vim.keymap.set('n', '<leader>rr', function()
   for name, _ in pairs(package.loaded) do
     if name:match '^custom' or name == 'snippets' or name == 'local' then
