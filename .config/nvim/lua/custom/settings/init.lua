@@ -29,7 +29,25 @@ vim.opt.timeoutlen = 300 -- Shorter mapping timeout.
 vim.opt.splitright = true -- Open vertical splits to the right.
 vim.opt.splitbelow = true -- Open horizontal splits below.
 vim.opt.signcolumn = 'yes' -- Always show the sign column (no text shift).
-vim.opt.scrolloff = 18 -- Keep 18 lines of context above/below cursor.
+vim.opt.scrolloff = 0 -- Centering is done by the zz autocmd below.
+
+-- Keep the cursor vertically centered: zz on every move (scrolls past EOF,
+-- unlike scrolloff=999; the top half-screen stays uncentered). Mirrors
+-- vim-classic's CenterCursor autocmd.
+vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
+  group = vim.api.nvim_create_augroup('center_cursor', {}),
+  callback = function()
+    local bt = vim.bo.buftype
+    if (bt ~= '' and bt ~= 'help') or vim.fn.pumvisible() ~= 0 then
+      return
+    end
+    -- In insert mode the cursor may sit past EOL (e.g. after `A`); the
+    -- normal-mode round trip of :normal clamps it onto the last char.
+    local curpos = vim.api.nvim_win_get_cursor(0)
+    vim.cmd 'normal! zz'
+    vim.api.nvim_win_set_cursor(0, curpos)
+  end,
+})
 vim.opt.tabstop = 4 -- Display tabs as 4 spaces.
 vim.opt.softtabstop = 4 -- Insert 4 spaces per <Tab>.
 vim.opt.expandtab = true -- Use spaces instead of tabs.
@@ -49,16 +67,10 @@ vim.opt.titlestring = '%F' -- ...to full path of current buffer.
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 vim.keymap.set('n', '<leader>r', vim.diagnostic.open_float, { desc = 'Open floating diagnostic message' })
 
--- Diagnostic display. Neovim 0.11+ ships with virtual_text OFF by default, so
--- errors only showed as a faint underline + gutter sign with no inline message --
--- which is why problems were so easy to miss. Turn on inline messages, sort by
--- severity, and give each severity a clear sign in the gutter.
+-- Diagnostic display: message inline at end of line (virtual_text),
+-- underline + gutter sign; <leader>r opens the full float on demand.
 vim.diagnostic.config {
-  virtual_text = {
-    spacing = 2,
-    source = false, -- don't prefix inline messages with the source (clangd/clang-tidy)
-    prefix = '●', -- shown before each inline message on the right of the line
-  },
+  virtual_text = true,
   underline = true, -- squiggle under the offending span
   severity_sort = true, -- errors sort above warnings on the same line
   update_in_insert = false, -- don't churn diagnostics while typing
@@ -503,11 +515,33 @@ vim.api.nvim_create_autocmd({ 'CursorHold', 'FocusGained', 'BufEnter' }, {
   end,
 })
 
+-- Clipboard provider selection.
 -- Over SSH, force OSC 52 so yanks land on the local machine's clipboard.
 -- Without this a remote host with its own clipboard tool (pbcopy on the mac)
 -- wins provider detection and yanks get stranded in that machine's clipboard.
+--
+-- Locally inside tmux (no X display here, so xclip is dead and neovim would
+-- otherwise auto-fall-back to the OSC 52 provider), route through tmux's own
+-- buffer instead. neovim forwards a terminal child's OSC 52 copy (e.g. claude's
+-- mouse selection) through this provider; with the OSC 52 provider it re-emits
+-- the sequence mid-redraw and the raw escape codes leak into the buffer.
+-- `tmux load-buffer -w` writes via a subprocess -- no escape sequence is ever
+-- emitted -- and still pushes to the system clipboard via `set-clipboard on`.
 if vim.env.SSH_TTY then
   vim.g.clipboard = 'osc52'
+elseif vim.env.TMUX then
+  vim.g.clipboard = {
+    name = 'tmux',
+    copy = {
+      ['+'] = { 'tmux', 'load-buffer', '-w', '-' },
+      ['*'] = { 'tmux', 'load-buffer', '-w', '-' },
+    },
+    paste = {
+      ['+'] = { 'tmux', 'save-buffer', '-' },
+      ['*'] = { 'tmux', 'save-buffer', '-' },
+    },
+    cache_enabled = 0,
+  }
 end
 vim.opt.clipboard = 'unnamedplus'
 

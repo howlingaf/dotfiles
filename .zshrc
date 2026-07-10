@@ -2,8 +2,8 @@ export ZSH="$HOME/.oh-my-zsh"
 export PATH="$HOME/.cargo/bin:$PATH"
 export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/.local/share/nvim/mason/bin:$PATH"
-export EDITOR="~/.config/vim-classic/bin/cvim"
-export VISUAL="~/.config/vim-classic/bin/cvim"
+export EDITOR="nvim"
+export VISUAL="nvim"
 
 setopt IGNORE_EOF
 setopt PROMPT_SUBST
@@ -49,11 +49,11 @@ git_prompt_info() {
 bindkey -v
 bindkey -M viins 'jk' vi-cmd-mode
 
-alias vi="~/.config/vim-classic/bin/cvim"
-alias nv="cd ~/.config/vim-classic"
+alias vi="nvim"
+alias nv="cd ~/.config/nvim"
 alias vd="visidata"
 alias src=". $HOME/.zshrc && echo '.zshrc sourced'"
-alias rc="~/.config/vim-classic/bin/cvim $HOME/.zshrc ; . $HOME/.zshrc"
+alias rc="nvim $HOME/.zshrc ; . $HOME/.zshrc"
 alias dg='git --git-dir=$HOME/.dotfiles --work-tree=$HOME'
 unalias cl cr c 2>/dev/null
 
@@ -111,7 +111,12 @@ fzf_edit_history(){
     print -r -- "$f"
   done | fzy)
   [[ -z "$file" ]] && return
-  cd "${file%/*}" && ~/.config/vim-classic/bin/cvim "$file"
+  # Land in the file's repo root when it's tracked in one; otherwise fall
+  # back to the file's own directory. Resolve from the file's dir (git -C),
+  # not $PWD -- the file may live in a different repo than where we are now.
+  local dir=${file%/*} froot
+  froot=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || froot=$dir
+  cd "$froot" && nvim "$file"
 }
 
 fzf_cd_history(){
@@ -121,7 +126,7 @@ fzf_cd_history(){
 }
 
 launch_nvim(){
-  ~/.config/vim-classic/bin/cvim
+  nvim
 }
 
 fzf_cmd_history(){
