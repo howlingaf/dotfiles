@@ -2,6 +2,14 @@
 # native-comp/eln, caches) or machine-local (local.el: vault URL + paths).
 /*
 !/.gitignore
+!/early-init.el
 !/init.el
 !/vault.el
 !/theme.el
+!/writing.el
+!/editor.el
+!/lint.el
+!/cpp.el
+!/roam.el
+!/lisp/
+!/lisp/targets.el

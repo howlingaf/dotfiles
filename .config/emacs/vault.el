@@ -9,6 +9,7 @@
 ;; Commands:  M-x vault-search  (find text/notes)   M-x vault-dired  (browse)
 
 (require 'seq)
+(require 'cl-lib)
 (require 'auth-source)
 (require 'url)
 
@@ -39,10 +40,14 @@
       remote-file-name-inhibit-cache 30
       tramp-use-ssh-controlmaster-options nil)
 
+(defun vault--goto-file-line (file &optional line)
+  "Open FILE (absolute or TRAMP path) and jump to LINE (1-based)."
+  (find-file file)
+  (when line (goto-char (point-min)) (forward-line (1- line))))
+
 (defun vault-open-note (path &optional line)
   "Visit vault note PATH (server-relative), optionally at LINE."
-  (find-file (concat vault-remote-root path))
-  (when line (goto-char (point-min)) (forward-line (1- line))))
+  (vault--goto-file-line (concat vault-remote-root path) line))
 
 (defun vault-dired ()
   "Open the vault root in dired — browse, rename (R), create, all over ssh."
@@ -87,6 +92,20 @@
 (defvar vault--corpus-ttl 120 "Seconds before the corpus is refetched.")
 (defvar vault--corpus-refreshing nil)
 
+(defun vault-refresh-corpus ()
+  "Drop the cached search index so the next `vault-search' re-fetches.
+The server corpus is live, so this makes deletes/edits show up immediately."
+  (interactive)
+  (setq vault--corpus-lines nil vault--corpus-time nil))
+
+;; A vault note deleted via dired stays in the CACHED search index until the
+;; 120s TTL lapses. Invalidate the cache on delete so the next search re-fetches
+;; (the server already reflects the deletion).
+(defun vault--invalidate-corpus-on-delete (file &rest _)
+  (when (and vault-remote-root (string-prefix-p vault-remote-root file))
+    (setq vault--corpus-lines nil vault--corpus-time nil)))
+(advice-add 'dired-delete-file :after #'vault--invalidate-corpus-on-delete)
+
 (defun vault--corpus-fetch ()
   "Download every note line as \"path:line: text\" in one request."
   (let* ((url-request-method "GET")
@@ -127,34 +146,92 @@
       vault--corpus-lines)
      (t (vault--corpus-fetch)))))
 
+;;; local org-roam notes — full-text, merged into the same search --------------
+;; The remote corpus is markdown only; the org-roam notes (~/howlingaf-notes)
+;; are local .org files. Index them the same way so ONE `vault-search' finds
+;; both. Read on each search (note sets are small); the remote side stays cached.
+(defun vault--org-dir ()
+  (expand-file-name
+   (if (boundp 'my/org-roam-dir) my/org-roam-dir "~/howlingaf-notes/")))
+
+(defun vault--org-title (line)
+  "Return the `#+title:' value from LINE, or nil."
+  (when (string-match "^#\\+[Tt][Ii][Tt][Ll][Ee]:[ \t]*\\(.*\\)$" line)
+    (string-trim (match-string 1 line))))
+
+(defun vault--org-noise-p (line)
+  "Non-nil for org metadata lines (drawers, properties, #+keywords) — not body."
+  (string-match-p "^\\(:[A-Za-z]\\|#\\+\\)" line))
+
+(defun vault--local-org-entries ()
+  "Full-text entries for local org notes: list of (FILE LINE TEXT REL TITLE)."
+  (let ((dir (vault--org-dir)) entries)
+    (when (file-directory-p dir)
+      (dolist (file (directory-files-recursively dir "\\.org\\'"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          (let ((rel (file-relative-name file dir)) (n 0) title lines)
+            (dolist (line (split-string (buffer-string) "\n"))
+              (setq n (1+ n))
+              (let ((tx (string-trim line)))
+                (unless title (setq title (vault--org-title tx)))
+                (unless (or (string-empty-p tx) (vault--org-noise-p tx))
+                  (push (list file n tx rel) lines))))
+            (setq title (or title (file-name-base file)))
+            (dolist (e (nreverse lines))
+              (push (append e (list title)) entries))))))
+    (nreverse entries)))
+
 ;;; the search ------------------------------------------------------------------
 (defun vault-search ()
-  "Fuzzy-search the whole vault; every typed word must appear in the line.
-Note titles match too.  Enter opens the note at that line."
+  "Fuzzy-search the whole vault AND local org-roam notes; every typed word must
+appear in the line.  Note titles match too.  Enter opens the note at that line."
   (interactive)
   (let* ((index (make-hash-table :test 'equal))
+         (entries
+          (append
+           ;; remote markdown vault, from the cached corpus
+           (delq nil
+                 (mapcar
+                  (lambda (l)
+                    (when (string-match "^\\(.*?\\):\\([0-9]+\\): \\(.*\\)$" l)
+                      (let ((path (match-string 1 l)))
+                        (unless (vault--streamer-hidden-p path)
+                          (list (concat vault-remote-root path)         ; openable FILE
+                                (string-to-number (match-string 2 l))   ; LINE
+                                (match-string 3 l)                      ; TEXT
+                                path                                    ; REL (display)
+                                (file-name-base path))))))              ; TITLE
+                  (vault--corpus)))
+           ;; local org notes; streamer guard uses their vault-synced path — the
+           ;; roam dir's basename is the sub-path they rclone into on the server.
+           (let ((sync-prefix (concat (file-name-nondirectory
+                                       (directory-file-name (vault--org-dir))) "/")))
+             (delq nil
+                   (mapcar
+                    (lambda (e)
+                      (unless (vault--streamer-hidden-p (concat sync-prefix (nth 3 e)))
+                        e))
+                    (vault--local-org-entries))))))
          (cands
           (let ((i 0) (seen (make-hash-table :test 'equal)) out)
-            (dolist (l (vault--corpus) (nreverse out))
-              (when (string-match "^\\(.*?\\):\\([0-9]+\\): \\(.*\\)$" l)
-                (let ((path (match-string 1 l)))
-                  (unless (vault--streamer-hidden-p path)   ; streamer allow-list
-                    (unless (gethash path seen)   ; one TITLE candidate per note
-                      (puthash path t seen)
-                      (let ((title (concat (file-name-base path)
-                                           (propertize (format "​%d" (setq i (1+ i)))
-                                                       'invisible t))))
-                        (puthash title (cons path 1) index)
-                        (push title out)))
-                    (let ((cand (concat (match-string 3 l)
-                                        (propertize (format "​%d" (setq i (1+ i)))
-                                                    'invisible t))))
-                      (puthash cand (cons path (string-to-number (match-string 2 l)))
-                               index)
-                      (push cand out))))))))
+            ;; each candidate = DISPLAY + an invisible unique counter (so lines
+            ;; with identical text stay distinct), mapped to its open-target.
+            (cl-flet ((add (file ln rel disp)
+                        (let ((c (concat disp (propertize (format "​%d" (setq i (1+ i)))
+                                                          'invisible t))))
+                          (puthash c (list file ln rel) index)
+                          (push c out))))
+              (dolist (e entries (nreverse out))
+                (let ((file (nth 0 e)) (line (nth 1 e)) (text (nth 2 e))
+                      (rel (nth 3 e)) (title (nth 4 e)))
+                  (unless (gethash file seen)   ; one TITLE candidate per note
+                    (puthash file t seen)
+                    (add file 1 rel title))
+                  (add file line rel text))))))
          (annotate (lambda (cand)
                      (when-let ((tgt (gethash cand index)))
-                       (propertize (format "   %s:%d" (car tgt) (cdr tgt)) 'face 'shadow))))
+                       (propertize (format "   %s:%d" (nth 2 tgt) (nth 1 tgt)) 'face 'shadow))))
          (table (lambda (str pred action)
                   (if (eq action 'metadata)
                       `(metadata (category . vault-match)
@@ -167,7 +244,7 @@ Note titles match too.  Enter opens the note at that line."
          (completion-ignore-case t)
          (pick (completing-read "Vault search: " table))
          (target (gethash pick index)))
-    (if target (vault-open-note (car target) (cdr target))
+    (if target (vault--goto-file-line (nth 0 target) (nth 1 target))
       (user-error "Pick a result line"))))
 
 (provide 'vault)
