@@ -38,7 +38,6 @@ vim.g.matchup_matchparen_offscreen = {}
 -- its `version` to a branch/tag, restart, run vim.pack.update(), then
 -- optionally re-pin (see :h vim.pack-examples).
 local specs = {
-  { src = 'https://github.com/tpope/vim-sleuth', version = 'be69bff86754b1aa5adcbb527d7fcd1635a84080' },
   { src = 'https://github.com/nvim-lua/plenary.nvim', version = '74b06c6c75e4eeb3108ec01852001636d85a932b' },
   { src = 'https://github.com/nvim-telescope/telescope.nvim', version = '7d324792b7943e4aa16ad007212e6acc6f9fe335' },
   { src = 'https://github.com/neovim/nvim-lspconfig', version = '229b79051b380377664edc4cbd534930154921a1' },
@@ -110,6 +109,13 @@ vim.pack.add(specs, { confirm = false })
 vim.opt.rtp:append(vim.fn.stdpath 'config' .. '/sticky-peek.nvim')
 
 -- Telescope
+-- List files with rg, then keep only those grep classifies as text (-I drops
+-- files with binary content). Catches extensionless executables, .o files,
+-- images, etc. by content rather than extension, so text like .sh survives.
+-- Side effect: zero-byte files are dropped too (grep sees no matching line).
+local function text_files_cmd(rg_flags)
+  return { 'sh', '-c', 'rg --files ' .. rg_flags .. [[ | xargs -r -d '\n' grep -Il '' 2>/dev/null]] }
+end
 require('telescope').setup {
   defaults = {
     preview = { treesitter = false },
@@ -123,6 +129,11 @@ require('telescope').setup {
       '%.cache/',
     },
   },
+  pickers = {
+    find_files = {
+      find_command = text_files_cmd '',
+    },
+  },
 }
 pcall(require('telescope').load_extension, 'fzf')
 
@@ -130,7 +141,14 @@ vim.keymap.set('n', '<leader>sk', '<cmd>Telescope keymaps<cr>', { desc = '[S]ear
 vim.keymap.set('n', '<leader>sf', '<cmd>Telescope find_files<cr>', { desc = '[S]earch [F]iles' })
 -- Like <leader>sf but includes hidden dotfiles AND git-ignored files
 -- (build dirs, etc.) -- a full "find everything" search on demand.
-vim.keymap.set('n', '<leader>sF', '<cmd>Telescope find_files hidden=true no_ignore=true<cr>', { desc = '[S]earch [F]iles (all, incl. hidden + ignored)' })
+vim.keymap.set('n', '<leader>sF', function()
+  -- hidden/no_ignore opts only work with a bare rg/fd find_command, so bake
+  -- the flags into the text-filtering command instead.
+  require('telescope.builtin').find_files {
+    find_command = text_files_cmd '--hidden --no-ignore',
+    prompt_title = 'Find Files (all, incl. hidden + ignored)',
+  }
+end, { desc = '[S]earch [F]iles (all, incl. hidden + ignored)' })
 vim.keymap.set('n', '<leader>ss', '<cmd>Telescope builtin<cr>', { desc = '[S]earch [S]elect Telescope' })
 vim.keymap.set('n', '<leader>sw', '<cmd>Telescope grep_string<cr>', { desc = '[S]earch current [W]ord' })
 vim.keymap.set('n', '<leader>sg', '<cmd>Telescope live_grep<cr>', { desc = '[S]earch by [G]rep' })

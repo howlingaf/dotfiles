@@ -52,7 +52,7 @@ bindkey -M viins 'jk' vi-cmd-mode
 alias vi="nvim"
 alias nv="cd ~/.config/nvim"
 alias vd="visidata"
-alias src=". $HOME/.zshrc && echo '.zshrc sourced'"
+alias sr=". $HOME/.zshrc && echo '.zshrc sourced'"
 alias rc="nvim $HOME/.zshrc ; . $HOME/.zshrc"
 alias dg='git --git-dir=$HOME/.dotfiles --work-tree=$HOME'
 unalias cl cr c 2>/dev/null
@@ -223,3 +223,12 @@ rt() {
   }
   cd "$root"
 }
+
+
+# BEGIN opam configuration
+# This is useful if you're using opam as it adds:
+#   - the correct directories to the PATH
+#   - auto-completion for the opam binary
+# This section can be safely removed at any time if needed.
+[[ ! -r '/home/howlingaf/.opam/opam-init/init.zsh' ]] || source '/home/howlingaf/.opam/opam-init/init.zsh' > /dev/null 2> /dev/null
+# END opam configuration

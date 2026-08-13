@@ -30,15 +30,17 @@ vim.opt.splitright = true -- Open vertical splits to the right.
 vim.opt.splitbelow = true -- Open horizontal splits below.
 vim.opt.signcolumn = 'yes' -- Always show the sign column (no text shift).
 vim.opt.scrolloff = 0 -- Centering is done by the zz autocmd below.
+vim.opt.exrc = true -- Load project-local .nvim.lua (prompts to trust on first use).
 
 -- Keep the cursor vertically centered: zz on every move (scrolls past EOF,
 -- unlike scrolloff=999; the top half-screen stays uncentered). Mirrors
 -- vim-classic's CenterCursor autocmd.
+local wheel_scrolling = false
 vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
   group = vim.api.nvim_create_augroup('center_cursor', {}),
   callback = function()
     local bt = vim.bo.buftype
-    if (bt ~= '' and bt ~= 'help') or vim.fn.pumvisible() ~= 0 then
+    if (bt ~= '' and bt ~= 'help') or vim.fn.pumvisible() ~= 0 or wheel_scrolling then
       return
     end
     -- In insert mode the cursor may sit past EOL (e.g. after `A`); the
@@ -48,8 +50,23 @@ vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
     vim.api.nvim_win_set_cursor(0, curpos)
   end,
 })
-vim.opt.tabstop = 4 -- Display tabs as 4 spaces.
-vim.opt.softtabstop = 4 -- Insert 4 spaces per <Tab>.
+
+-- Let the mouse wheel scroll the view freely instead of fighting the centering
+-- autocmd above. Guard the wheel's native scroll so CursorMoved skips re-centering
+-- while scrolling; the cursor is left where the scroll leaves it, and the next
+-- keyboard move re-centers as usual.
+for _, key in ipairs { '<ScrollWheelUp>', '<ScrollWheelDown>' } do
+  vim.keymap.set({ 'n', 'i', 'v' }, key, function()
+    wheel_scrolling = true
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(key, true, false, true), 'n', false)
+    vim.schedule(function()
+      wheel_scrolling = false
+    end)
+  end)
+end
+
+vim.opt.tabstop = 2 -- Display tabs as 2 spaces.
+vim.opt.softtabstop = 2 -- Insert 2 spaces per <Tab>.
 vim.opt.expandtab = true -- Use spaces instead of tabs.
 vim.opt.shiftwidth = 2 -- Indent with 2 spaces.
 vim.opt.smartindent = true -- Add indent for new blocks in C-like syntax.
@@ -64,8 +81,11 @@ vim.opt.conceallevel = 1
 vim.opt.title = true -- Set terminal/pane title (OSC 2)...
 vim.opt.titlestring = '%F' -- ...to full path of current buffer.
 
-vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
+vim.keymap.set('n', '<leader>dq', vim.diagnostic.setloclist, { desc = 'Open [d]iagnostic [q]uickfix list' })
 vim.keymap.set('n', '<leader>r', vim.diagnostic.open_float, { desc = 'Open floating diagnostic message' })
+
+vim.keymap.set('n', '<leader>w', '<cmd>w<CR>', { desc = '[W]rite buffer' })
+vim.keymap.set('n', '<leader>q', '<cmd>q<CR>', { desc = '[Q]uit window' })
 
 -- Diagnostic display: message inline at end of line (virtual_text),
 -- underline + gutter sign; <leader>r opens the full float on demand.
@@ -185,13 +205,29 @@ end
 local parent_state_path = vim.fn.stdpath 'run' .. '/nvim-term-parent-' .. vim.fn.getpid()
 
 local function write_parent_state()
-  if not Term or not Term.caller_file then return end
+  if not Term or not Term.caller_file then
+    return
+  end
   local fd = io.open(parent_state_path, 'w')
-  if not fd then return end
+  if not fd then
+    return
+  end
   local line = Term.caller_pos and Term.caller_pos[1] or 0
   local col = Term.caller_pos and (Term.caller_pos[2] + 1) or 0
   fd:write(Term.caller_file .. '\n' .. line .. '\n' .. col .. '\n')
   fd:close()
+end
+
+-- Env a floating terminal's child inherits so it can find the parent cursor:
+-- NVIM_PARENT_STATE points at the live state file (refreshed on every cursor
+-- move); the FILE/LINE/COL vars are the snapshot from when the float opened.
+local function parent_env(T)
+  return {
+    NVIM_PARENT_STATE = parent_state_path,
+    NVIM_PARENT_FILE = T.caller_file or '',
+    NVIM_PARENT_LINE = tostring(T.caller_pos and T.caller_pos[1] or 0),
+    NVIM_PARENT_COL = tostring(T.caller_pos and (T.caller_pos[2] + 1) or 0),
+  }
 end
 
 -- Keep the parent-state file live: refresh on cursor move / buffer switch in
@@ -202,10 +238,16 @@ end
 vim.api.nvim_create_autocmd({ 'BufEnter', 'CursorMoved', 'CursorMovedI', 'InsertLeave' }, {
   group = vim.api.nvim_create_augroup('TermParentState', { clear = true }),
   callback = function(ev)
-    if not Term then return end
-    if vim.bo[ev.buf].buftype ~= '' then return end
+    if not Term then
+      return
+    end
+    if vim.bo[ev.buf].buftype ~= '' then
+      return
+    end
     local name = vim.api.nvim_buf_get_name(ev.buf)
-    if name == '' then return end
+    if name == '' then
+      return
+    end
     Term.caller_file = name
     Term.caller_pos = vim.api.nvim_win_get_cursor(0)
     if Term.buf and vim.api.nvim_buf_is_valid(Term.buf) then
@@ -250,11 +292,15 @@ local function make_floating_term(cmd, opts)
     -- If caller was in insert in their buffer, vim auto-enters terminal-job
     -- mode when focus lands on a terminal buffer, which auto-follows the
     -- terminal cursor (bottom). Force terminal-normal before restoring view.
-    if T.last_mode ~= 't' then vim.cmd 'stopinsert' end
+    if T.last_mode ~= 't' then
+      vim.cmd 'stopinsert'
+    end
     if T.last_view then
       vim.fn.winrestview(T.last_view)
     end
-    if T.last_mode == 't' then vim.cmd 'startinsert' end
+    if T.last_mode == 't' then
+      vim.cmd 'startinsert'
+    end
   end
 
   function T.hide()
@@ -278,7 +324,9 @@ local function make_floating_term(cmd, opts)
           if caller_win and vim.api.nvim_win_is_valid(caller_win) then
             vim.api.nvim_set_current_win(caller_win)
           end
-          if vim.bo.buftype ~= '' then return end
+          if vim.bo.buftype ~= '' then
+            return
+          end
           -- If saved cursor was past end-of-line (insert append), use startinsert!
           -- so it lands after the last char without clamping.
           local at_eol = false
@@ -312,7 +360,9 @@ local function make_floating_term(cmd, opts)
         T.caller_pos = vim.api.nvim_win_get_cursor(0)
         T.caller_file = vim.api.nvim_buf_get_name(0)
       end
-      if opts.on_open then opts.on_open(T) end
+      if opts.on_open then
+        opts.on_open(T)
+      end
       T.open()
     end
   end
@@ -330,8 +380,12 @@ vim.api.nvim_create_autocmd('WinEnter', {
   group = vim.api.nvim_create_augroup('TermFloatFocus', { clear = true }),
   callback = function()
     local t = visible_floating_term()
-    if not t or t.win == vim.api.nvim_get_current_win() then return end
-    if vim.api.nvim_win_get_config(0).relative ~= '' then return end
+    if not t or t.win == vim.api.nvim_get_current_win() then
+      return
+    end
+    if vim.api.nvim_win_get_config(0).relative ~= '' then
+      return
+    end
     vim.schedule(function()
       if t.win and vim.api.nvim_win_is_valid(t.win) then
         vim.api.nvim_set_current_win(t.win)
@@ -342,21 +396,22 @@ vim.api.nvim_create_autocmd('WinEnter', {
 
 Term = make_floating_term({ 'claude', '-c' }, {
   term_vim = false,
-  env = function(T)
-    return {
-      NVIM_PARENT_STATE = parent_state_path,
-      NVIM_PARENT_FILE = T.caller_file or '',
-      NVIM_PARENT_LINE = tostring(T.caller_pos and T.caller_pos[1] or 0),
-      NVIM_PARENT_COL = tostring(T.caller_pos and (T.caller_pos[2] + 1) or 0),
-    }
+  env = parent_env,
+  on_open = function()
+    write_parent_state()
   end,
-  on_open = function() write_parent_state() end,
 })
 
 for _, key in ipairs { '<C-Space>', '<C-@>', '<NUL>' } do
   vim.keymap.set({ 'n', 'i', 't' }, key, Term.toggle, { desc = 'Toggle floating Claude terminal' })
 end
-local ShellTerm = make_floating_term({ vim.o.shell }, { term_vim = false })
+local ShellTerm = make_floating_term({ vim.o.shell }, {
+  term_vim = false,
+  env = parent_env,
+  on_open = function()
+    write_parent_state()
+  end,
+})
 vim.keymap.set({ 'n', 'i', 't' }, '<S-Space>', ShellTerm.toggle, { desc = 'Toggle floating shell terminal' })
 
 -- Note: `K` (LSP hover) and `<leader>K` (definition peek) are mapped per-buffer
@@ -413,11 +468,17 @@ local function term_goto()
   -- below still confirms the result and we fall back to the single-line token, so
   -- non-wrapped output behaves exactly as before.
   local width = vim.api.nvim_win_get_width(0)
-  local function full(l) return l ~= nil and #l >= width end
+  local function full(l)
+    return l ~= nil and #l >= width
+  end
 
   local s, e = col, col
-  while s > 1 and not line:sub(s - 1, s - 1):match '%s' do s = s - 1 end
-  while e <= #line and not line:sub(e, e):match '%s' do e = e + 1 end
+  while s > 1 and not line:sub(s - 1, s - 1):match '%s' do
+    s = s - 1
+  end
+  while e <= #line and not line:sub(e, e):match '%s' do
+    e = e + 1
+  end
   local single = line:sub(s, e - 1)
 
   local joined = single
@@ -427,10 +488,16 @@ local function term_goto()
   while endcol == #lines[r] and full(lines[r]) and lines[r + 1] do
     local nxt = lines[r + 1]
     local a = 1
-    while a <= #nxt and nxt:sub(a, a):match '%s' do a = a + 1 end
-    if a > #nxt then break end
+    while a <= #nxt and nxt:sub(a, a):match '%s' do
+      a = a + 1
+    end
+    if a > #nxt then
+      break
+    end
     local j = a
-    while j <= #nxt and nxt:sub(j, j):match '%S' do j = j + 1 end
+    while j <= #nxt and nxt:sub(j, j):match '%S' do
+      j = j + 1
+    end
     joined = joined .. nxt:sub(a, j - 1)
     r, endcol = r + 1, j - 1
   end
@@ -440,7 +507,9 @@ local function term_goto()
   while full(lines[r2 - 1]) and tline:sub(1, tstart - 1):match '^%s*$' do
     local prv = lines[r2 - 1]
     local a = 1
-    while a <= #prv and prv:sub(a, a):match '%s' do a = a + 1 end
+    while a <= #prv and prv:sub(a, a):match '%s' do
+      a = a + 1
+    end
     joined = prv:sub(a) .. joined
     r2, tline, tstart = r2 - 1, prv, a
   end
@@ -455,13 +524,25 @@ local function term_goto()
   local function classify(tok)
     tok = clean_token(tok)
     local p, lnum, cnum = tok:match '^(.-):(%d+):(%d+)$'
-    if not p then p, lnum = tok:match '^(.-):(%d+)%-%d+$' end
-    if not p then p, lnum = tok:match '^(.-):(%d+)$' end
-    if not p then p = tok end
-    if p:sub(1, 1) == '~' then p = vim.fn.expand(p) end
-    if p:sub(1, 1) ~= '/' then p = vim.fn.getcwd() .. '/' .. p end
+    if not p then
+      p, lnum = tok:match '^(.-):(%d+)%-%d+$'
+    end
+    if not p then
+      p, lnum = tok:match '^(.-):(%d+)$'
+    end
+    if not p then
+      p = tok
+    end
+    if p:sub(1, 1) == '~' then
+      p = vim.fn.expand(p)
+    end
+    if p:sub(1, 1) ~= '/' then
+      p = vim.fn.getcwd() .. '/' .. p
+    end
     p = vim.fn.fnamemodify(p, ':p')
-    if vim.fn.filereadable(p) ~= 1 then return nil end
+    if vim.fn.filereadable(p) ~= 1 then
+      return nil
+    end
     return { path = p, lnum = tonumber(lnum), cnum = tonumber(cnum) }
   end
 
@@ -616,7 +697,6 @@ vim.opt.termguicolors = true
 
 vim.keymap.set('n', '<leader>wr', ':set wrap!<CR>', { noremap = true, silent = true })
 
-
 -- Window navigation: <C-h/j/k/l> for native nvim splits in normal mode, and
 -- the same keys in terminal mode (exit term mode then navigate). Replaces the
 -- vim-tmux-navigator setup since panes are now nvim-managed only.
@@ -670,9 +750,15 @@ local function cppman_under_cursor()
   local col = vim.api.nvim_win_get_cursor(0)[2] + 1
   -- Expand left/right over identifier chars plus ':' so std::vector is whole.
   local s, e = col, col
-  local function is_sym(c) return c:match '[%w_:]' ~= nil end
-  while s > 1 and is_sym(line:sub(s - 1, s - 1)) do s = s - 1 end
-  while e <= #line and is_sym(line:sub(e, e)) do e = e + 1 end
+  local function is_sym(c)
+    return c:match '[%w_:]' ~= nil
+  end
+  while s > 1 and is_sym(line:sub(s - 1, s - 1)) do
+    s = s - 1
+  end
+  while e <= #line and is_sym(line:sub(e, e)) do
+    e = e + 1
+  end
   local sym = line:sub(s, e - 1):gsub('^:+', ''):gsub(':+$', '')
   if sym == '' then
     vim.notify('No symbol under cursor', vim.log.levels.WARN)
@@ -684,7 +770,8 @@ local function cppman_under_cursor()
   -- it looks/scrolls/closes (q) exactly like the tidydoc and :Man buffers.
   local width = math.min(100, vim.o.columns)
   local out = vim.fn.systemlist {
-    'sh', '-c',
+    'sh',
+    '-c',
     string.format('MANPAGER=cat MANWIDTH=%d cppman %s 2>/dev/null | col -bx', width, vim.fn.shellescape(sym)),
   }
   if vim.v.shell_error ~= 0 or #out == 0 then
@@ -730,12 +817,12 @@ local function tidydoc_under_cursor()
   -- split scratch buffer with filetype=man — same look/scroll/q as :Man grep.
   local width = math.min(100, vim.o.columns)
   local sh = string.format(
-    "curl -fsSL --compressed %s "
-      .. "| pandoc -f html -t man "
+    'curl -fsSL --compressed %s '
+      .. '| pandoc -f html -t man '
       .. "| sed -e 's/¶//g' -e 's/\\\\[|]/ /g' "
-      .. "| { printf '.TH \"%s\" \"clang-tidy\" \"\" \"\" \"\"\\n'; cat; } "
-      .. "| MANWIDTH=%d man -l - "
-      .. "| col -bx",
+      .. '| { printf \'.TH "%s" "clang-tidy" "" "" ""\\n\'; cat; } '
+      .. '| MANWIDTH=%d man -l - '
+      .. '| col -bx',
     vim.fn.shellescape(url),
     check,
     width
@@ -754,7 +841,9 @@ vim.keymap.set('n', '<leader>td', tidydoc_under_cursor, { desc = 'clang-[t]idy [
 -- Sticky full path at the top of each buffer (winbar), relative to the repo root.
 local function winbar_path(buf)
   local full = vim.api.nvim_buf_get_name(buf)
-  if full == '' then return '' end
+  if full == '' then
+    return ''
+  end
   full = vim.fn.fnamemodify(full, ':p')
   -- The upward .git walk never changes for a buffer; cache it (false = no repo).
   local root = vim.b[buf].winbar_git_root
@@ -777,10 +866,18 @@ vim.api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'BufFilePost' }, {
   group = vim.api.nvim_create_augroup('StickyPathWinbar', { clear = true }),
   callback = function(ev)
     local win = vim.api.nvim_get_current_win()
-    if vim.api.nvim_win_get_config(win).relative ~= '' then return end -- skip floats
-    if vim.bo[ev.buf].buftype ~= '' then return end -- skip terminal/help/nofile/qf
-    if vim.api.nvim_buf_get_name(ev.buf) == '' then return end -- skip unnamed
-    if ev.event == 'BufFilePost' then vim.b[ev.buf].winbar_git_root = nil end -- rename: re-walk
+    if vim.api.nvim_win_get_config(win).relative ~= '' then
+      return
+    end -- skip floats
+    if vim.bo[ev.buf].buftype ~= '' then
+      return
+    end -- skip terminal/help/nofile/qf
+    if vim.api.nvim_buf_get_name(ev.buf) == '' then
+      return
+    end -- skip unnamed
+    if ev.event == 'BufFilePost' then
+      vim.b[ev.buf].winbar_git_root = nil
+    end -- rename: re-walk
     vim.wo[win].winbar = winbar_path(ev.buf)
   end,
 })
