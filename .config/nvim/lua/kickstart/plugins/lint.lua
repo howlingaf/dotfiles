@@ -6,7 +6,6 @@ local lint = require 'lint'
 -- clang-tidy const pass below, triggered by its own autocmd.
 lint.linters_by_ft = {}
 
-local lint_augroup = vim.api.nvim_create_augroup('lint', { clear = true })
 
 -- C/C++ const-correctness on save.
 --
@@ -32,26 +31,21 @@ lint.linters.clangtidy_const = {
     '--checks=-*,misc-const-correctness',
     '--config={}', -- ignore ~/.clang-tidy so ONLY the check above runs
   },
-  parser = require('lint.parser').from_pattern(
-    pattern,
-    groups,
-    severity_map,
-    { ['source'] = 'clang-tidy (const)' }
-  ),
+  parser = require('lint.parser').from_pattern(pattern, groups, severity_map, { ['source'] = 'clang-tidy (const)' }),
 }
 
--- On open and on save -- NOT on every keystroke/InsertLeave: clang-tidy
--- recompiles the whole translation unit (~0.85s here), so it runs async in
--- the background on BufReadPost/BufWritePost only. The const squiggle appears
--- ~1s after a C/C++ file opens, then refreshes on each save.
-vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufWritePost' }, {
-  group = lint_augroup,
-  pattern = { '*.c', '*.cc', '*.cpp', '*.cxx', '*.h', '*.hpp', '*.hxx' },
-  callback = function()
-    if vim.fn.executable 'clang-tidy' == 1 then
-      pcall(function()
-        lint.try_lint 'clangtidy_const'
-      end)
-    end
-  end,
-})
+-- On demand only. C/C++ run the classic tags workflow with no live
+-- diagnostics (clangd is off too), so this doesn't fire on open/save any
+-- more; :TidyConst runs the const-correctness pass when you want it, and
+-- :TidyClear drops its squiggles. clang-tidy recompiles the whole translation
+-- unit (~0.85s), async in the background.
+vim.api.nvim_create_user_command('TidyConst', function()
+  if vim.fn.executable 'clang-tidy' ~= 1 then
+    vim.notify('clang-tidy not installed', vim.log.levels.WARN)
+    return
+  end
+  lint.try_lint 'clangtidy_const'
+end, { desc = 'Run the clang-tidy const-correctness check on this buffer' })
+vim.api.nvim_create_user_command('TidyClear', function()
+  vim.diagnostic.reset(nil, 0)
+end, { desc = 'Clear clang-tidy diagnostics in this buffer' })

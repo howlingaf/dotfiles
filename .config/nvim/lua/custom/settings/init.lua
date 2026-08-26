@@ -14,7 +14,7 @@ vim.api.nvim_create_autocmd('BufReadPost', {
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 vim.opt.number = true -- Show line numbers.
-vim.opt.relativenumber = true -- Relative line numbers for easy movement.
+vim.opt.relativenumber = false -- Relative line numbers for easy movement.
 vim.g.have_nerd_font = false
 vim.opt.mouse = 'a' -- Enable mouse in all modes.
 vim.opt.showmode = false -- Don't show "-- INSERT --" since statusline usually does.
@@ -78,6 +78,39 @@ vim.opt.list = true -- Show invisible characters.
 vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣' }
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 vim.opt.conceallevel = 1
+
+-- Use ripgrep for :grep, results into the quickfix list (file:line:col:text).
+-- <leader>sg / <leader>sw (init.lua) prefill a :grep command from here.
+if vim.fn.executable 'rg' == 1 then
+  vim.opt.grepprg = 'rg --vimgrep --smart-case'
+  vim.opt.grepformat = '%f:%l:%c:%m'
+end
+-- Quickfix is the temp buffer for <leader>sg / sw: <CR> jumps AND closes, Esc/q
+-- close without jumping -- pick-and-dismiss like the other search UIs.
+-- Still there to browse with j/k; :cnext/:cprev step without reopening it.
+vim.api.nvim_create_autocmd('FileType', {
+  group = vim.api.nvim_create_augroup('qf_jump_close', { clear = true }),
+  pattern = 'qf',
+  callback = function(ev)
+    vim.keymap.set('n', '<CR>', '<CR><cmd>cclose<CR>', { buffer = ev.buf, desc = 'Jump and close quickfix' })
+    -- Esc (or q) dismisses the list without jumping, like the other temp UIs.
+    vim.keymap.set('n', '<Esc>', '<cmd>cclose<CR>', { buffer = ev.buf, desc = 'Close quickfix' })
+    vim.keymap.set('n', 'q', '<cmd>cclose<CR>', { buffer = ev.buf, desc = 'Close quickfix' })
+  end,
+})
+
+-- Pop the quickfix window open automatically after a :grep.
+vim.api.nvim_create_autocmd('QuickFixCmdPost', {
+  group = vim.api.nvim_create_augroup('grep_quickfix', { clear = true }),
+  pattern = { 'grep', 'grepadd' },
+  callback = function()
+    if vim.fn.getqflist({ size = 0 }).size == 0 then
+      vim.notify('no matches', vim.log.levels.INFO)
+    else
+      vim.cmd 'botright cwindow'
+    end
+  end,
+})
 vim.opt.title = true -- Set terminal/pane title (OSC 2)...
 vim.opt.titlestring = '%F' -- ...to full path of current buffer.
 
@@ -142,300 +175,25 @@ vim.api.nvim_create_autocmd('BufReadPost', {
 
 vim.keymap.set('i', 'jk', '<Esc>')
 
--- Terminal-mode "vim" maps (jk escape, <C-h/j/k/l> window nav) intercept keys
--- that shells and TUIs want for themselves. They're applied buffer-locally on
--- TermOpen so <C-q> can toggle them per terminal, and a terminal can opt out
--- at creation by setting vim.b.term_vim = false before termopen (the shell
--- scratchpad float does this — it types like a plain terminal by default).
--- The built-in <C-\><C-n> escape works regardless of the toggle state.
-local term_vim_maps = {}
-local function term_vim_map(lhs, rhs, opts)
-  table.insert(term_vim_maps, { lhs = lhs, rhs = rhs, opts = opts })
-end
-local function apply_term_vim(buf, on)
-  for _, m in ipairs(term_vim_maps) do
-    if on then
-      vim.keymap.set('t', m.lhs, m.rhs, vim.tbl_extend('force', m.opts, { buffer = buf }))
-    else
-      pcall(vim.keymap.del, 't', m.lhs, { buffer = buf })
-    end
-  end
-end
-vim.api.nvim_create_autocmd('TermOpen', {
-  group = vim.api.nvim_create_augroup('TermVimMaps', { clear = true }),
-  callback = function(ev)
-    if vim.b[ev.buf].term_vim == nil then
-      vim.b[ev.buf].term_vim = true
-    end
-    apply_term_vim(ev.buf, vim.b[ev.buf].term_vim)
-  end,
-})
-local function toggle_term_vim()
-  local buf = vim.api.nvim_get_current_buf()
-  if vim.bo[buf].buftype ~= 'terminal' then
-    vim.notify('Not a terminal buffer', vim.log.levels.WARN)
-    return
-  end
-  local on = not vim.b[buf].term_vim
-  vim.b[buf].term_vim = on
-  apply_term_vim(buf, on)
-  vim.notify('Terminal vim maps: ' .. (on and 'on' or 'off'))
-end
-vim.keymap.set({ 'n', 't' }, '<C-q>', toggle_term_vim, { desc = 'Toggle vim maps in this terminal' })
-
-term_vim_map('jk', [[<C-\><C-n>]], { noremap = true })
-
--- Floating terminal toggles. Each instance has its own persistent buffer;
--- killed only when its command `exit`s or the buffer is :bd!'d.
-local Term -- forward declared so closures in write_parent_state can reference it
-
--- Registry of all floating terminals, so each toggle can detect a sibling that
--- is currently shown and switch/hide instead of stacking a second float on top.
-local floating_terms = {}
-local function visible_floating_term()
-  for _, t in ipairs(floating_terms) do
-    if t.win and vim.api.nvim_win_is_valid(t.win) then
-      return t
-    end
-  end
-end
-
--- Path the claude shell reads to learn what file/line/col the parent was on.
--- Per-nvim-instance so multiple nvims don't clobber each other.
-local parent_state_path = vim.fn.stdpath 'run' .. '/nvim-term-parent-' .. vim.fn.getpid()
-
-local function write_parent_state()
-  if not Term or not Term.caller_file then
-    return
-  end
-  local fd = io.open(parent_state_path, 'w')
-  if not fd then
-    return
-  end
-  local line = Term.caller_pos and Term.caller_pos[1] or 0
-  local col = Term.caller_pos and (Term.caller_pos[2] + 1) or 0
-  fd:write(Term.caller_file .. '\n' .. line .. '\n' .. col .. '\n')
-  fd:close()
-end
-
--- Env a floating terminal's child inherits so it can find the parent cursor:
--- NVIM_PARENT_STATE points at the live state file (refreshed on every cursor
--- move); the FILE/LINE/COL vars are the snapshot from when the float opened.
-local function parent_env(T)
-  return {
-    NVIM_PARENT_STATE = parent_state_path,
-    NVIM_PARENT_FILE = T.caller_file or '',
-    NVIM_PARENT_LINE = tostring(T.caller_pos and T.caller_pos[1] or 0),
-    NVIM_PARENT_COL = tostring(T.caller_pos and (T.caller_pos[2] + 1) or 0),
-  }
-end
-
--- Keep the parent-state file live: refresh on cursor move / buffer switch in
--- any real file buffer, so the shell sees the user's current position even
--- while the floating terminal is open. The position is always tracked in
--- memory, but the file is only written once the Claude terminal exists --
--- otherwise every cursor move would do file I/O for a reader that isn't there.
-vim.api.nvim_create_autocmd({ 'BufEnter', 'CursorMoved', 'CursorMovedI', 'InsertLeave' }, {
-  group = vim.api.nvim_create_augroup('TermParentState', { clear = true }),
-  callback = function(ev)
-    if not Term then
-      return
-    end
-    if vim.bo[ev.buf].buftype ~= '' then
-      return
-    end
-    local name = vim.api.nvim_buf_get_name(ev.buf)
-    if name == '' then
-      return
-    end
-    Term.caller_file = name
-    Term.caller_pos = vim.api.nvim_win_get_cursor(0)
-    if Term.buf and vim.api.nvim_buf_is_valid(Term.buf) then
-      write_parent_state()
-    end
-  end,
-})
-
-local function make_floating_term(cmd, opts)
-  opts = opts or {}
-  local T = { buf = nil, win = nil, last_view = nil, last_mode = nil }
-
-  function T.open()
-    local w = math.floor(vim.o.columns * 0.75)
-    local h = math.floor(vim.o.lines * 0.95)
-    local fresh = not (T.buf and vim.api.nvim_buf_is_valid(T.buf))
-    if fresh then
-      T.buf = vim.api.nvim_create_buf(false, true)
-    end
-    T.win = vim.api.nvim_open_win(T.buf, true, {
-      relative = 'editor',
-      width = w,
-      height = h,
-      row = math.floor((vim.o.lines - h) / 2),
-      col = math.floor((vim.o.columns - w) / 2),
-      border = 'single',
-    })
-    vim.wo[T.win].scrolloff = 999
-    if fresh or vim.bo[T.buf].buftype ~= 'terminal' then
-      if opts.term_vim == false then
-        vim.b[T.buf].term_vim = false
-      end
-      if opts.env then
-        vim.fn.jobstart(cmd, { term = true, env = opts.env(T) })
-      else
-        vim.fn.jobstart(cmd, { term = true })
-      end
-      vim.cmd 'startinsert'
-      return
-    end
-    vim.api.nvim_set_current_win(T.win)
-    -- If caller was in insert in their buffer, vim auto-enters terminal-job
-    -- mode when focus lands on a terminal buffer, which auto-follows the
-    -- terminal cursor (bottom). Force terminal-normal before restoring view.
-    if T.last_mode ~= 't' then
-      vim.cmd 'stopinsert'
-    end
-    if T.last_view then
-      vim.fn.winrestview(T.last_view)
-    end
-    if T.last_mode == 't' then
-      vim.cmd 'startinsert'
-    end
-  end
-
-  function T.hide()
-    if T.win and vim.api.nvim_win_is_valid(T.win) then
-      vim.api.nvim_set_current_win(T.win)
-      T.last_view = vim.fn.winsaveview()
-      T.last_mode = vim.api.nvim_get_mode().mode == 't' and 't' or 'n'
-      vim.api.nvim_win_close(T.win, true)
-      T.win = nil
-    end
-  end
-
-  function T.toggle()
-    if T.win and vim.api.nvim_win_is_valid(T.win) then
-      local resume_insert = T.caller_insert
-      local caller_win = T.caller_win
-      local caller_pos = T.caller_pos
-      T.hide()
-      if resume_insert then
-        vim.defer_fn(function()
-          if caller_win and vim.api.nvim_win_is_valid(caller_win) then
-            vim.api.nvim_set_current_win(caller_win)
-          end
-          if vim.bo.buftype ~= '' then
-            return
-          end
-          -- If saved cursor was past end-of-line (insert append), use startinsert!
-          -- so it lands after the last char without clamping.
-          local at_eol = false
-          if caller_pos then
-            local row, col = caller_pos[1], caller_pos[2]
-            local line = vim.api.nvim_buf_get_lines(0, row - 1, row, false)[1] or ''
-            at_eol = col >= #line
-            if not at_eol then
-              pcall(vim.api.nvim_win_set_cursor, 0, caller_pos)
-            else
-              pcall(vim.api.nvim_win_set_cursor, 0, { row, math.max(0, #line - 1) })
-            end
-          end
-          vim.cmd(at_eol and 'startinsert!' or 'startinsert')
-        end, 10)
-      end
-    else
-      local sibling = visible_floating_term()
-      if sibling and sibling ~= T then
-        -- Another float is up. Inherit ITS real-editor caller (not the sibling's
-        -- float window) so hiding T later returns to the editor instead of
-        -- bouncing back to the sibling, then close the sibling and swap T in.
-        T.caller_insert = sibling.caller_insert
-        T.caller_win = sibling.caller_win
-        T.caller_pos = sibling.caller_pos
-        T.caller_file = sibling.caller_file
-        sibling.hide()
-      else
-        T.caller_insert = vim.api.nvim_get_mode().mode:sub(1, 1) == 'i'
-        T.caller_win = vim.api.nvim_get_current_win()
-        T.caller_pos = vim.api.nvim_win_get_cursor(0)
-        T.caller_file = vim.api.nvim_buf_get_name(0)
-      end
-      if opts.on_open then
-        opts.on_open(T)
-      end
-      T.open()
-    end
-  end
-
-  table.insert(floating_terms, T)
-  return T
-end
-
--- A visible floating terminal covers most of the viewport, so there's no
--- reason for focus to land on the editor windows behind it (mouse click,
--- stray <C-w> nav). Bounce focus back to the float. Other floats (e.g. LSP
--- hover) may still take focus; hide/swap paths are unaffected because
--- they close the float before focus moves.
-vim.api.nvim_create_autocmd('WinEnter', {
-  group = vim.api.nvim_create_augroup('TermFloatFocus', { clear = true }),
-  callback = function()
-    local t = visible_floating_term()
-    if not t or t.win == vim.api.nvim_get_current_win() then
-      return
-    end
-    if vim.api.nvim_win_get_config(0).relative ~= '' then
-      return
-    end
-    vim.schedule(function()
-      if t.win and vim.api.nvim_win_is_valid(t.win) then
-        vim.api.nvim_set_current_win(t.win)
-      end
-    end)
-  end,
-})
-
-Term = make_floating_term({ 'claude', '-c' }, {
-  term_vim = false,
-  env = parent_env,
-  on_open = function()
-    write_parent_state()
-  end,
-})
-
-for _, key in ipairs { '<C-Space>', '<C-@>', '<NUL>' } do
-  vim.keymap.set({ 'n', 'i', 't' }, key, Term.toggle, { desc = 'Toggle floating Claude terminal' })
-end
-local ShellTerm = make_floating_term({ vim.o.shell }, {
-  term_vim = false,
-  env = parent_env,
-  on_open = function()
-    write_parent_state()
-  end,
-})
-vim.keymap.set({ 'n', 'i', 't' }, '<S-Space>', ShellTerm.toggle, { desc = 'Toggle floating shell terminal' })
+-- Terminals (toggle terminals, :Sh, gf in terminals): lua/custom/term.lua.
+require 'custom.term'
 
 -- Note: `K` (LSP hover) and `<leader>K` (definition peek) are mapped per-buffer
 -- on LspAttach in init.lua, so they only bind where an LSP is active.
 --
--- Neutralize keyword-lookup (`keywordprg`, default `:Man`) in C/C++ buffers.
--- cppman's integration and the default :Man handler open a man-page split for
--- symbols like `size_t`; with `K` already bound to LSP hover that man page was
--- leaking in *behind* the hover float. Empty keywordprg here so nothing but the
--- hover ever appears, and the two are fully independent.
+-- Neutralize keyword-lookup (`keywordprg`, default `:Man`) where clangd is
+-- still attached (objc/objcpp): with `K` bound to LSP hover there, the
+-- default :Man handler was opening a man-page split behind the hover float.
+-- C/C++ set their own keywordprg in after/plugin/c-tags.lua.
 vim.api.nvim_create_autocmd('FileType', {
-  pattern = { 'c', 'cpp', 'objc', 'objcpp' },
+  pattern = { 'objc', 'objcpp' },
   group = vim.api.nvim_create_augroup('NoManKeywordprg', { clear = true }),
   callback = function(ev)
     vim.bo[ev.buf].keywordprg = ''
   end,
 })
 
--- Strip wrapping punctuation/brackets from a token (shared by term_goto's
--- classifier and the URL copiers below).
-local function clean_token(tok)
-  tok = tok:gsub('^[%(%[%{\'"`]+', ''):gsub('[%)%]%}\'",;:%.]+$', '')
-  return tok
-end
+local clean_token = require('custom.term').clean_token
 
 -- Copy a URL-ish token to the system clipboard, prepending https:// if bare.
 local function copy_url(tok)
@@ -443,148 +201,6 @@ local function copy_url(tok)
   vim.fn.setreg('+', url)
   vim.notify('URL copied to clipboard: ' .. url, vim.log.levels.INFO)
 end
-
--- In a :terminal buffer, `gf` and `gd` resolve the token under the cursor
--- (URL, or path with optional :LINE:COL) and open it in the underlying
--- non-floating window — the floating terminal hides itself first. No LSP
--- lookup happens here; the terminal buffer has no client.
-local function term_goto()
-  local buf = vim.api.nvim_get_current_buf()
-  local row = vim.api.nvim_win_get_cursor(0)[1]
-  local col = vim.api.nvim_win_get_cursor(0)[2] + 1
-  -- Only a window of scrollback around the cursor -- the wrap-stitching below
-  -- never reaches further, and a terminal can hold tens of thousands of lines.
-  local first = math.max(0, row - 100)
-  local lines = vim.api.nvim_buf_get_lines(buf, first, row + 100, false)
-  row = row - first
-  local line = lines[row]
-
-  -- A terminal hard-wraps long output across buffer lines with no separator, so
-  -- a path can be split across rows. The reliable wrap signal is that the source
-  -- line is full-width (filled to the window width); a shorter line ended for
-  -- real. The continuation may carry a leading margin -- shells wrap flush to
-  -- column 1, but a TUI like Claude indents every line -- so on each next/prev
-  -- line we skip leading whitespace before taking its content run. filereadable()
-  -- below still confirms the result and we fall back to the single-line token, so
-  -- non-wrapped output behaves exactly as before.
-  local width = vim.api.nvim_win_get_width(0)
-  local function full(l)
-    return l ~= nil and #l >= width
-  end
-
-  local s, e = col, col
-  while s > 1 and not line:sub(s - 1, s - 1):match '%s' do
-    s = s - 1
-  end
-  while e <= #line and not line:sub(e, e):match '%s' do
-    e = e + 1
-  end
-  local single = line:sub(s, e - 1)
-
-  local joined = single
-  -- forward: token reaches the end of a full-width line -> the next line is a
-  -- wrap continuation; skip its leading margin and append its content run.
-  local r, endcol = row, e - 1
-  while endcol == #lines[r] and full(lines[r]) and lines[r + 1] do
-    local nxt = lines[r + 1]
-    local a = 1
-    while a <= #nxt and nxt:sub(a, a):match '%s' do
-      a = a + 1
-    end
-    if a > #nxt then
-      break
-    end
-    local j = a
-    while j <= #nxt and nxt:sub(j, j):match '%S' do
-      j = j + 1
-    end
-    joined = joined .. nxt:sub(a, j - 1)
-    r, endcol = r + 1, j - 1
-  end
-  -- backward: token sits at the content start of its line (only margin before
-  -- it) and the previous line is full-width -> prepend that line's content run.
-  local r2, tline, tstart = row, line, s
-  while full(lines[r2 - 1]) and tline:sub(1, tstart - 1):match '^%s*$' do
-    local prv = lines[r2 - 1]
-    local a = 1
-    while a <= #prv and prv:sub(a, a):match '%s' do
-      a = a + 1
-    end
-    joined = prv:sub(a) .. joined
-    r2, tline, tstart = r2 - 1, prv, a
-  end
-
-  local stripped = single:gsub('^[%(%[%{\'"`]+', '')
-  if stripped:match '^https?://' or stripped:match '^www%.' then
-    copy_url(clean_token(joined))
-    return
-  end
-
-  -- Resolve a token to a readable file (with optional :LINE:COL); nil if not.
-  local function classify(tok)
-    tok = clean_token(tok)
-    local p, lnum, cnum = tok:match '^(.-):(%d+):(%d+)$'
-    if not p then
-      p, lnum = tok:match '^(.-):(%d+)%-%d+$'
-    end
-    if not p then
-      p, lnum = tok:match '^(.-):(%d+)$'
-    end
-    if not p then
-      p = tok
-    end
-    if p:sub(1, 1) == '~' then
-      p = vim.fn.expand(p)
-    end
-    if p:sub(1, 1) ~= '/' then
-      p = vim.fn.getcwd() .. '/' .. p
-    end
-    p = vim.fn.fnamemodify(p, ':p')
-    if vim.fn.filereadable(p) ~= 1 then
-      return nil
-    end
-    return { path = p, lnum = tonumber(lnum), cnum = tonumber(cnum) }
-  end
-
-  -- Prefer the stitched token; fall back to the single cursor line.
-  local res = classify(joined) or classify(single)
-  if not res then
-    vim.notify('Not a file: ' .. joined, vim.log.levels.WARN)
-    return
-  end
-  local path, lnum, cnum = res.path, res.lnum, res.cnum
-
-  local target
-  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-    if (vim.api.nvim_win_get_config(w).relative or '') == '' then
-      target = w
-      break
-    end
-  end
-  -- Hide whichever floating terminal is up -- gf is mapped in every terminal
-  -- (Claude float, shell float, plain :terminal), not just the Claude one.
-  local float = visible_floating_term()
-  if float then
-    float.hide()
-  end
-  if target and vim.api.nvim_win_is_valid(target) then
-    vim.api.nvim_set_current_win(target)
-  else
-    vim.cmd 'wincmd p'
-  end
-
-  vim.cmd('edit ' .. vim.fn.fnameescape(path))
-  if lnum then
-    pcall(vim.api.nvim_win_set_cursor, 0, { lnum, math.max(0, (cnum or 1) - 1) })
-    vim.cmd 'normal! zz'
-  end
-end
-
-vim.api.nvim_create_autocmd('TermOpen', {
-  callback = function(ev)
-    vim.keymap.set('n', 'gf', term_goto, { buffer = ev.buf, desc = 'Open file/URL under cursor in main window' })
-  end,
-})
 
 -- Reload files Claude (or anything else) edits on disk while open in nvim
 -- ('autoread' is on by default; checktime is what actually polls).
@@ -656,19 +272,6 @@ vim.keymap.set('n', 'gf', function()
   vim.cmd 'normal! gf'
 end, { desc = 'gf: open URL or file under cursor' })
 
--- Re-source the config. Purges this config's own modules so `require` re-runs
--- them; re-running vim.pack.add() is a no-op, and autocmd-captured closures
--- need a full restart to pick up edits (see memory note) -- this is best-effort.
-vim.keymap.set('n', '<leader>rr', function()
-  for name, _ in pairs(package.loaded) do
-    if name:match '^custom' or name == 'snippets' or name == 'local' then
-      package.loaded[name] = nil
-    end
-  end
-  vim.cmd 'source $MYVIMRC'
-  print 'Neovim config reloaded (restart for autocmd/closure changes)'
-end, { noremap = true, silent = true })
-
 -- :Q (and :Q!) quits the entire nvim instance, not just the current window.
 vim.api.nvim_create_user_command('Q', function(opts)
   vim.cmd(opts.bang and 'qall!' or 'qall')
@@ -697,19 +300,6 @@ vim.opt.termguicolors = true
 
 vim.keymap.set('n', '<leader>wr', ':set wrap!<CR>', { noremap = true, silent = true })
 
--- Window navigation: <C-h/j/k/l> for native nvim splits in normal mode, and
--- the same keys in terminal mode (exit term mode then navigate). Replaces the
--- vim-tmux-navigator setup since panes are now nvim-managed only.
-vim.keymap.set('n', '<C-h>', '<C-w>h', { silent = true, desc = 'Window: left' })
-vim.keymap.set('n', '<C-j>', '<C-w>j', { silent = true, desc = 'Window: down' })
-vim.keymap.set('n', '<C-k>', '<C-w>k', { silent = true, desc = 'Window: up' })
-vim.keymap.set('n', '<C-l>', '<C-w>l', { silent = true, desc = 'Window: right' })
-
-term_vim_map('<C-h>', [[<C-\><C-n><cmd>wincmd h<cr>]], { silent = true })
-term_vim_map('<C-j>', [[<C-\><C-n><cmd>wincmd j<cr>]], { silent = true })
-term_vim_map('<C-k>', [[<C-\><C-n><cmd>wincmd k<cr>]], { silent = true })
-term_vim_map('<C-l>', [[<C-\><C-n><cmd>wincmd l<cr>]], { silent = true })
-
 -- Highlight text momentarily after yanking.
 vim.api.nvim_create_autocmd('TextYankPost', {
   desc = 'Highlight when yanking (copying) text',
@@ -719,33 +309,16 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   end,
 })
 
--- Show `lines` in a :Man-style horizontal split scratch buffer -- read-only,
--- filetype=man for the look/scroll, `q` closes (buffer-local, overrides the
--- global `q`->`<nop>`). Shared by cppman and tidydoc below.
+-- tidydoc renders into a man-style read-only bottom split.
 local function open_man_scratch(name, lines)
-  vim.cmd 'botright new'
-  local buf = vim.api.nvim_get_current_buf()
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modifiable = false
-  vim.bo[buf].readonly = true
-  vim.bo[buf].buftype = 'nofile'
-  vim.bo[buf].bufhidden = 'wipe'
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].filetype = 'man'
-  vim.api.nvim_buf_set_name(buf, name)
-  local win = vim.api.nvim_get_current_win()
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = 'no'
-  vim.wo[win].list = false
-  vim.api.nvim_win_set_cursor(win, { 1, 0 })
-  vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = buf, nowait = true, silent = true })
+  require('custom.term').scratch_split(name, lines, { filetype = 'man', height = math.floor(vim.o.lines / 2) })
 end
 
--- Shift+M: open cppman's interactive pager for the symbol under the cursor in
--- a floating terminal. The symbol grab includes `::` qualifiers so std::vector
--- resolves whole, not just `vector`. Close the pager (q) and the float closes.
-local function cppman_under_cursor()
+-- Shift+M: open the man page for the symbol under the cursor via :Man. C++
+-- stdlib pages come from stdman (cppreference as man3, /usr/local/man shadows
+-- gcc's doxygen pages); C library symbols hit the regular man-pages set. The
+-- symbol grab includes `::` qualifiers so std::vector resolves whole.
+local function man_under_cursor()
   local line = vim.api.nvim_get_current_line()
   local col = vim.api.nvim_win_get_cursor(0)[2] + 1
   -- Expand left/right over identifier chars plus ':' so std::vector is whole.
@@ -765,23 +338,12 @@ local function cppman_under_cursor()
     return
   end
 
-  -- cppman already renders to a man page; MANPAGER=cat emits it as text, col -bx
-  -- flattens the overstrike bold. Drop it into a :Man-style horizontal split so
-  -- it looks/scrolls/closes (q) exactly like the tidydoc and :Man buffers.
-  local width = math.min(100, vim.o.columns)
-  local out = vim.fn.systemlist {
-    'sh',
-    '-c',
-    string.format('MANPAGER=cat MANWIDTH=%d cppman %s 2>/dev/null | col -bx', width, vim.fn.shellescape(sym)),
-  }
-  if vim.v.shell_error ~= 0 or #out == 0 then
-    vim.notify('cppman: nothing for "' .. sym .. '"', vim.log.levels.WARN)
-    return
-  end
-
-  open_man_scratch('cppman://' .. sym, out)
+  -- :Man (after/plugin/man-lang.lua) does the lookup: renders natively, and
+  -- for a bare name ranks C-library vs std:: pages by buffer language and
+  -- offers a picker when ambiguous.
+  vim.cmd.Man(sym)
 end
-vim.keymap.set('n', '<S-m>', cppman_under_cursor, { desc = 'cppman docs for symbol under cursor' })
+vim.keymap.set('n', '<S-m>', man_under_cursor, { desc = 'man page for symbol under cursor' })
 
 -- <leader>td: open the clang-tidy doc page for the diagnostic on the cursor
 -- line, rendered as text in a read-only float via `w3m -dump`. The check name

@@ -15,36 +15,29 @@ function _zsh_plugin_install() {
 }
 
 _zsh_plugin_install zsh-edit               https://github.com/marlonrichert/zsh-edit.git
-_zsh_plugin_install zsh-autosuggestions    https://github.com/zsh-users/zsh-autosuggestions.git
-_zsh_plugin_install zsh-syntax-highlighting https://github.com/zsh-users/zsh-syntax-highlighting.git
 _zsh_plugin_install zsh-vim-mode           https://github.com/softmoth/zsh-vim-mode.git
 
-ZSH_THEME="robbyrussell"
+ZSH_THEME=""  # no theme; PROMPT is set by hand below
 
-eval "$(zoxide init zsh)"
 
 plugins=(
-  zsh-autosuggestions
   zsh-vim-mode
-  zsh-syntax-highlighting
   zsh-edit
 )
 
 source $ZSH/oh-my-zsh.sh
 
-GIT_BRANCH_MAXLEN=24
-git_prompt_info() {
-  [[ "$(__git_prompt_git config --get oh-my-zsh.hide-info 2>/dev/null)" == "1" ]] && return
-  local ref
-  ref=$(__git_prompt_git symbolic-ref --short HEAD 2>/dev/null) \
-    || ref=$(__git_prompt_git rev-parse --short HEAD 2>/dev/null) \
-    || return 0
-  ref="${ref#erwinb/}"
-  if (( ${#ref} > GIT_BRANCH_MAXLEN )); then
-    ref="${ref[1,GIT_BRANCH_MAXLEN]}…"
-  fi
-  echo "${ZSH_THEME_GIT_PROMPT_PREFIX}${ref}$(parse_git_dirty)${ZSH_THEME_GIT_PROMPT_SUFFIX}"
-}
+# Bash-style prompt, like Arch's default PS1 '[\u@\h \W]\$ ': [user@host dir]$
+# with ~ for home. No oh-my-zsh theme (ZSH_THEME is empty above).
+PROMPT='[%n@%m %1~]$ '
+
+# No colors. Types are told apart the pre-color Unix way, with ls -F markers:
+# dir/  executable*  symlink@  fifo|  socket=  (plain files get nothing).
+# Overrides oh-my-zsh's `ls --color=tty`; l/ll/la expand through this alias.
+# Completion menus drop their colors too (they already append / to dirs).
+alias ls='ls -F --color=never'
+zstyle ':completion:*' list-colors ''
+
 
 bindkey -v
 bindkey -M viins 'jk' vi-cmd-mode
@@ -80,6 +73,21 @@ c() {
 }
 
 nvim() {
+  # Inside an nvim :terminal (Neovim exports $NVIM, its RPC socket) don't nest
+  # an editor: hand the files to the parent, which hides the terminal and
+  # opens them in the window it was toggled from. No files -> nothing to do.
+  if [[ -n $NVIM ]]; then
+    local f opened=0
+    for f in "$@"; do
+      [[ $f == -* ]] && continue
+      # custom/term.lua open_file hides the terminal and
+      # opens the file in the window it was toggled from. '' escapes ' in vimscript.
+      command nvim --server "$NVIM" --remote-expr "v:lua.require('custom.term').open_file('${${f:A}//\'/\'\'}')" >/dev/null
+      opened=1
+    done
+    (( opened )) || { print -u2 "nvim: already inside nvim (\$NVIM set); nothing opened"; return 1 }
+    return
+  fi
   local root
   root=$(git rev-parse --show-toplevel 2>/dev/null) || { command nvim "$@"; return }
   local -a args
@@ -103,14 +111,21 @@ chpwd(){
 
 fzf_edit_history(){
   local file root
-  # Inside a git repo, only offer files from that repo; otherwise the full list.
+  # Inside a git repo, only offer files from that repo, shown relative to its
+  # root (the absolute prefix is re-added after the pick); otherwise the full
+  # list with absolute paths.
   root=$(git rev-parse --show-toplevel 2>/dev/null)
   file=$(tac ~/.edit_history | while IFS= read -r f; do
     [[ -f $f ]] || continue
-    [[ -n $root && $f != $root/* ]] && continue
-    print -r -- "$f"
+    if [[ -n $root ]]; then
+      [[ $f == $root/* ]] || continue
+      print -r -- "${f#$root/}"
+    else
+      print -r -- "$f"
+    fi
   done | fzy)
   [[ -z "$file" ]] && return
+  [[ -n $root ]] && file=$root/$file
   # Land in the file's repo root when it's tracked in one; otherwise fall
   # back to the file's own directory. Resolve from the file's dir (git -C),
   # not $PWD -- the file may live in a different repo than where we are now.
@@ -170,25 +185,44 @@ set-pane-title() {
 autoload -Uz add-zsh-hook
 add-zsh-hook precmd set-pane-title
 
-# Centre the prompt the way scrolloff=999 centres the nvim cursor: the prompt
-# starts at the top and can descend only to the vertical middle; past that,
-# output scrolls up and the prompt stays put. Works in any terminal that answers
-# a cursor-position query (DSR) -- essentially all of them, nvim's included.
+# Keep the prompt on the vertical middle of the viewport, like scrolloff=999
+# keeps the nvim cursor centred: below the middle, scroll the screen up so the
+# prompt lands on the centre row; above it (fresh shell, after `clear`), move
+# the cursor down to the centre row. Works in any terminal that answers a
+# cursor-position query (DSR). Skipped inside nvim terminals (partial-height
+# splits; nvim manages the view there).
 _center_prompt() {
   emulate -L zsh
-  [[ -t 1 ]] || return              # only when stdout is a real terminal
+  [[ -t 1 && -z $NVIM ]] || return
   local target=$(( LINES / 2 )) reply row
-  # Ask the terminal for the cursor row (DSR); it replies on the tty.
-  print -n "\e[6n" >/dev/tty
+  print -n "\e[6n" >/dev/tty                       # DSR: ask for the cursor row
   IFS= read -rs -t 0.3 -d R reply </dev/tty || return
-  reply=${reply#*$'\e['}            # strip the ESC[ prefix -> "row;col"
+  reply=${reply#*$'\e['}                             # "row;col"
   row=${reply%%;*}
-  [[ $row == <-> ]] || return       # bail unless it's a clean number
-  # Only act once the prompt would sit below the middle: scroll the screen up
-  # so the upcoming prompt lands exactly on the centre row.
-  (( row > target )) && print -n "\e[$(( row - target ))S\e[${target};1H" >/dev/tty
+  [[ $row == <-> ]] || return
+  if (( row > target )); then
+    print -n "\e[$(( row - target ))S\e[${target};1H" >/dev/tty   # scroll up, then place
+  elif (( row < target )); then
+    print -n "\e[${target};1H" >/dev/tty                            # just move down
+  fi
 }
 add-zsh-hook precmd _center_prompt
+
+# Ctrl-L is a zle widget (clear-screen), not a command, so precmd never runs
+# and the prompt would land at the top. Clear, park the cursor on the centre
+# row, and let zle redraw the prompt there.
+_clear_screen_centered() {
+  if [[ -n $NVIM ]]; then
+    zle clear-screen
+    return
+  fi
+  print -n "\e[2J\e[$(( LINES / 2 ));1H" >/dev/tty
+  zle reset-prompt
+}
+zle -N _clear_screen_centered
+bindkey '^L' _clear_screen_centered
+bindkey -M viins '^L' _clear_screen_centered
+bindkey -M vicmd '^L' _clear_screen_centered
 
 [[ -f ~/.zshrc.mac ]] && source ~/.zshrc.mac
 [[ -f ~/.zshrc.wsl ]] && source ~/.zshrc.wsl

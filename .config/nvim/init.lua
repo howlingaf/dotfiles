@@ -1,5 +1,10 @@
 require 'custom.settings'
 
+-- Telescope is disabled in favour of throwaway-shell searches and the tags
+-- workflow. Flip to true to bring the fuzzy pickers back (nothing is
+-- uninstalled). LSP goto mappings fall back to native vim.lsp.buf when off.
+vim.g.use_telescope = false
+
 local have_make = vim.fn.executable 'make' == 1
 
 -- vim.pack has no `build` field; specs below carry their build step in
@@ -85,7 +90,6 @@ local specs = {
   { src = 'https://github.com/windwp/nvim-autopairs', version = '7b9923abad60b903ece7c52940e1321d39eccc79' },
   { src = 'https://github.com/lewis6991/gitsigns.nvim', version = '25050e4ed39e628282831d4cbecb1850454ce915' },
   { src = 'https://github.com/windwp/nvim-ts-autotag', version = '88c1453db4ba7dd24131086fe51fdf74e587d275' },
-  { src = 'https://github.com/ThePrimeagen/harpoon', version = '87b1a3506211538f460786c23f98ec63ad9af4e5' },
   { src = 'https://github.com/hat0uma/csvview.nvim', version = '5c22774c3ecc7f8883af5d143b366e45b1f0875d' },
 }
 if have_make then
@@ -116,61 +120,88 @@ vim.opt.rtp:append(vim.fn.stdpath 'config' .. '/sticky-peek.nvim')
 local function text_files_cmd(rg_flags)
   return { 'sh', '-c', 'rg --files ' .. rg_flags .. [[ | xargs -r -d '\n' grep -Il '' 2>/dev/null]] }
 end
-require('telescope').setup {
-  defaults = {
-    preview = { treesitter = false },
-    file_ignore_patterns = {
-      'node_modules',
-      '%.git/',
-      'dist/',
-      'build/',
-      '%.lock',
-      '__pycache__/',
-      '%.cache/',
+if vim.g.use_telescope then
+  require('telescope').setup {
+    defaults = {
+      preview = { treesitter = false },
+      file_ignore_patterns = {
+        'node_modules',
+        '%.git/',
+        'dist/',
+        'build/',
+        '%.lock',
+        '__pycache__/',
+        '%.cache/',
+      },
     },
-  },
-  pickers = {
-    find_files = {
-      find_command = text_files_cmd '',
+    pickers = {
+      find_files = {
+        find_command = text_files_cmd '',
+      },
     },
-  },
-}
-pcall(require('telescope').load_extension, 'fzf')
+  }
+  pcall(require('telescope').load_extension, 'fzf')
+end
 
-vim.keymap.set('n', '<leader>sk', '<cmd>Telescope keymaps<cr>', { desc = '[S]earch [K]eymaps' })
-vim.keymap.set('n', '<leader>sf', '<cmd>Telescope find_files<cr>', { desc = '[S]earch [F]iles' })
--- Like <leader>sf but includes hidden dotfiles AND git-ignored files
--- (build dirs, etc.) -- a full "find everything" search on demand.
-vim.keymap.set('n', '<leader>sF', function()
-  -- hidden/no_ignore opts only work with a bare rg/fd find_command, so bake
-  -- the flags into the text-filtering command instead.
-  require('telescope.builtin').find_files {
-    find_command = text_files_cmd '--hidden --no-ignore',
-    prompt_title = 'Find Files (all, incl. hidden + ignored)',
-  }
-end, { desc = '[S]earch [F]iles (all, incl. hidden + ignored)' })
-vim.keymap.set('n', '<leader>ss', '<cmd>Telescope builtin<cr>', { desc = '[S]earch [S]elect Telescope' })
-vim.keymap.set('n', '<leader>sw', '<cmd>Telescope grep_string<cr>', { desc = '[S]earch current [W]ord' })
-vim.keymap.set('n', '<leader>sg', '<cmd>Telescope live_grep<cr>', { desc = '[S]earch by [G]rep' })
-vim.keymap.set('n', '<leader>sd', '<cmd>Telescope diagnostics<cr>', { desc = '[S]earch [D]iagnostics' })
-vim.keymap.set('n', '<leader>sr', '<cmd>Telescope resume<cr>', { desc = '[S]earch [R]esume' })
-vim.keymap.set('n', '<leader>s.', '<cmd>Telescope oldfiles<cr>', { desc = '[S]earch Recent Files ("." for repeat)' })
-vim.keymap.set('n', '<leader>/', function()
-  require('telescope.builtin').current_buffer_fuzzy_find(require('telescope.themes').get_dropdown {
-    winblend = 10,
-    previewer = false,
-  })
-end, { desc = '[/] Fuzzily search in current buffer' })
-vim.keymap.set('n', '<leader>s/', function()
-  require('telescope.builtin').live_grep {
-    grep_open_files = true,
-    prompt_title = 'Live Grep in Open Files',
-  }
-end, { desc = '[S]earch [/] in Open Files' })
-vim.keymap.set('n', '<leader>sn', function()
-  require('telescope.builtin').find_files { cwd = vim.fn.stdpath 'config' }
-end, { desc = '[S]earch [N]eovim files' })
-vim.keymap.set('n', '<leader>e', '<cmd>Telescope find_files<cr>', { desc = 'Browse files in working directory' })
+-- <leader>sg / <leader>sw: :grep (ripgrep -> quickfix; grepprg is set in
+-- custom/settings), recursive from the project root. sw runs it on the word
+-- under the cursor; sg leaves the pattern for you to type in command mode.
+local function grep_cmd(pat)
+  return ('silent grep! %s %s'):format(pat, vim.fn.fnameescape(require('custom.project').root()))
+end
+vim.keymap.set('n', '<leader>sw', function()
+  local word = vim.fn.expand '<cword>'
+  if word ~= '' then
+    vim.cmd(grep_cmd(vim.fn.escape(word, ' \\')))
+  end
+end, { desc = '[S]earch [W]ord (:grep from project root)' })
+vim.keymap.set('n', '<leader>sg', function()
+  -- Cursor parked after "grep! " so typing inserts the pattern.
+  local line = ':' .. grep_cmd ''
+  local tail = #line - #'silent grep! ' - 1
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(line .. string.rep('<Left>', tail), true, false, true), 'n', false)
+end, { desc = '[S]earch by [G]rep (:grep from project root)' })
+vim.keymap.set('n', '<leader>sd', ':Sh ', { desc = '[S]earch: run command in throwaway split' })
+-- <leader>sf: run the zsh fzf_edit_history widget directly in a throwaway
+-- split (interactive zsh so .zshrc defines it). Picking a file comes back via
+-- the nvim() wrapper -> custom.term open_file, which closes the split and opens
+-- it; cancelling exits the command and the split closes on its own.
+vim.keymap.set('n', '<leader>sf', function()
+  require('custom.term').run('zsh -ic fzf_edit_history', { close_on_exit = true })
+end, { desc = '[S]earch [F]iles (fzf_edit_history)' })
+
+-- Telescope fuzzy pickers, only when vim.g.use_telescope is true.
+if vim.g.use_telescope then
+  vim.keymap.set('n', '<leader>sk', '<cmd>Telescope keymaps<cr>', { desc = '[S]earch [K]eymaps' })
+  vim.keymap.set('n', '<leader>sF', function()
+    require('telescope.builtin').find_files {
+      find_command = text_files_cmd '--hidden --no-ignore',
+      prompt_title = 'Find Files (all, incl. hidden + ignored)',
+    }
+  end, { desc = '[S]earch [F]iles (all, incl. hidden + ignored)' })
+  vim.keymap.set('n', '<leader>ss', '<cmd>Telescope builtin<cr>', { desc = '[S]earch [S]elect Telescope' })
+  vim.keymap.set('n', '<leader>sW', '<cmd>Telescope grep_string<cr>', { desc = '[S]earch current [W]ord (Telescope)' })
+  vim.keymap.set('n', '<leader>sG', '<cmd>Telescope live_grep<cr>', { desc = '[S]earch by [G]rep (Telescope)' })
+  vim.keymap.set('n', '<leader>sD', '<cmd>Telescope diagnostics<cr>', { desc = '[S]earch [D]iagnostics' })
+  vim.keymap.set('n', '<leader>sr', '<cmd>Telescope resume<cr>', { desc = '[S]earch [R]esume' })
+  vim.keymap.set('n', '<leader>s.', '<cmd>Telescope oldfiles<cr>', { desc = '[S]earch Recent Files ("." for repeat)' })
+  vim.keymap.set('n', '<leader>/', function()
+    require('telescope.builtin').current_buffer_fuzzy_find(require('telescope.themes').get_dropdown {
+      winblend = 10,
+      previewer = false,
+    })
+  end, { desc = '[/] Fuzzily search in current buffer' })
+  vim.keymap.set('n', '<leader>s/', function()
+    require('telescope.builtin').live_grep {
+      grep_open_files = true,
+      prompt_title = 'Live Grep in Open Files',
+    }
+  end, { desc = '[S]earch [/] in Open Files' })
+  vim.keymap.set('n', '<leader>sn', function()
+    require('telescope.builtin').find_files { cwd = vim.fn.stdpath 'config' }
+  end, { desc = '[S]earch [N]eovim files' })
+  vim.keymap.set('n', '<leader>e', '<cmd>Telescope find_files<cr>', { desc = 'Browse files in working directory' })
+end
 
 -- LSP
 -- Keymaps & UI on attach (unchanged)
@@ -186,15 +217,23 @@ vim.api.nvim_create_autocmd('LspAttach', {
     -- overload's signature (concrete types substituted) and doc comment,
     -- like Visual Studio's Quick Info. `<leader>K` peeks the full source
     -- definition inline (handy for browsing your own struct/class bodies).
+    -- (C/C++ never reach here: clangd is off there, K is a man lookup.)
     map('K', vim.lsp.buf.hover, 'Hover (Quick Info)')
     map('<leader>K', require('custom.peek').peek_definition, 'Peek Definition (source)')
 
-    map('gd', require('telescope.builtin').lsp_definitions, '[G]oto [D]efinition')
-    map('gr', require('telescope.builtin').lsp_references, '[G]oto [R]eferences')
-    map('gI', require('telescope.builtin').lsp_implementations, '[G]oto [I]mplementation')
-    map('<leader>D', require('telescope.builtin').lsp_type_definitions, 'Type [D]efinition')
-    map('<leader>ds', require('telescope.builtin').lsp_document_symbols, '[D]ocument [S]ymbols')
-    map('<leader>ws', require('telescope.builtin').lsp_dynamic_workspace_symbols, '[W]orkspace [S]ymbols')
+    -- Telescope pickers when enabled; native vim.lsp.buf (quickfix) otherwise.
+    local tb = vim.g.use_telescope and require 'telescope.builtin' or nil
+    local goto_maps = {
+      { 'gd', 'lsp_definitions', vim.lsp.buf.definition, '[G]oto [D]efinition' },
+      { 'gr', 'lsp_references', vim.lsp.buf.references, '[G]oto [R]eferences' },
+      { 'gI', 'lsp_implementations', vim.lsp.buf.implementation, '[G]oto [I]mplementation' },
+      { '<leader>D', 'lsp_type_definitions', vim.lsp.buf.type_definition, 'Type [D]efinition' },
+      { '<leader>ds', 'lsp_document_symbols', vim.lsp.buf.document_symbol, '[D]ocument [S]ymbols' },
+      { '<leader>ws', 'lsp_dynamic_workspace_symbols', vim.lsp.buf.workspace_symbol, '[W]orkspace [S]ymbols' },
+    }
+    for _, m in ipairs(goto_maps) do
+      map(m[1], tb and tb[m[2]] or m[3], m[4])
+    end
     map('<leader>rn', vim.lsp.buf.rename, '[R]e[n]ame')
     map('<leader>ca', vim.lsp.buf.code_action, '[C]ode [A]ction', { 'n', 'x' })
     map('gD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
@@ -320,14 +359,11 @@ local optional_servers = {
       },
     },
   },
+  -- clangd is off for C and C++: both use the classic ctags workflow
+  -- (after/plugin/c-tags.lua). 'c' and 'cpp' are dropped from the default
+  -- filetype list so clangd never attaches there. Put them back to undo.
   clangd = {
-    cmd = {
-      'clangd',
-      '--background-index',
-      '--header-insertion=iwyu',
-      '--completion-style=detailed',
-      '--function-arg-placeholders=1',
-    },
+    filetypes = { 'objc', 'objcpp', 'cuda', 'proto' },
   },
   jdtls = {
     settings = {
@@ -392,7 +428,7 @@ cmp.setup {
       luasnip.lsp_expand(args.body)
     end,
   },
-  completion = { completeopt = 'menu,menuone,noinsert' },
+  completion = { completeopt = 'menu,menuone,noinsert', autocomplete = false },
 
   mapping = cmp.mapping.preset.insert {
     ['<C-n>'] = cmp.mapping.select_next_item(),
@@ -435,15 +471,23 @@ cmp.setup {
 require('nvim-autopairs').setup {}
 cmp.event:on('confirm_done', require('nvim-autopairs.completion.cmp').on_confirm_done())
 
+-- C/C++: no completion popup (the classic tags workflow; clangd is off there).
+cmp.setup.filetype({ 'c', 'cpp' }, { enabled = false })
+
 -- Formatting (conform)
 -- prettierd with prettier fallback, shared by all JS/TS filetypes.
 local prettier = { 'prettierd', 'prettier', stop_after_first = true }
+-- Autoformat-on-save is currently OFF. Toggle with :FormatEnable / :FormatDisable
+-- (:FormatDisable! for the current buffer only). <leader>f still formats on demand.
+vim.g.disable_autoformat = true
 require('conform').setup {
   notify_on_error = false,
-  format_on_save = {
-    timeout_ms = 500,
-    lsp_format = 'fallback',
-  },
+  format_on_save = function(bufnr)
+    if vim.g.disable_autoformat or vim.b[bufnr].disable_autoformat then
+      return
+    end
+    return { timeout_ms = 500, lsp_format = 'fallback' }
+  end,
   formatters_by_ft = {
     lua = { 'stylua' },
     -- 'ruff' alone is a deprecated alias for ruff_fix (lint autofixes only);
@@ -454,14 +498,25 @@ require('conform').setup {
     javascriptreact = prettier,
     typescriptreact = prettier,
     go = { 'gofumpt', 'goimports' },
-    cpp = { 'clang-format' },
-    c = { 'clang-format' },
     java = { 'google-java-format' },
   },
 }
 vim.keymap.set('', '<leader>f', function()
   require('conform').format { async = true, lsp_format = 'fallback' }
 end, { desc = '[F]ormat buffer' })
+
+vim.api.nvim_create_user_command('FormatDisable', function(args)
+  if args.bang then
+    vim.b.disable_autoformat = true
+  else
+    vim.g.disable_autoformat = true
+  end
+end, { desc = 'Disable autoformat-on-save (! = this buffer only)', bang = true })
+
+vim.api.nvim_create_user_command('FormatEnable', function()
+  vim.b.disable_autoformat = false
+  vim.g.disable_autoformat = false
+end, { desc = 'Re-enable autoformat-on-save' })
 
 -- Aerial (symbol outline)
 require('aerial').setup {
@@ -574,5 +629,4 @@ require 'kickstart.plugins.lint'
 require 'kickstart.plugins.gitsigns'
 
 require('nvim-ts-autotag').setup {}
-require 'custom.plugins.harpoon'
 require 'custom.plugins.csv'
