@@ -1,7 +1,8 @@
--- Classic ctags workflow for C and C++ (clangd is disabled for both; see the
--- clangd entry in init.lua). Nothing here touches other filetypes.
+-- Classic ctags workflow for C and C++ (currently OFF: vim.g.use_ctags in
+-- init.lua). When on, it runs alongside clangd: gd/K stay LSP, Ctrl-] here
+-- becomes the tags jump. Nothing in this file touches other filetypes.
 --
---   Ctrl-]      jump to the definition of the word under the cursor
+--   Ctrl-]      jump to the definition of the word under the cursor (tags)
 --   g Ctrl-]    same, but list every match when a name has several
 --   Ctrl-t      jump back (pops the tag stack); :tags shows the stack
 --   :tselect X  browse matches for X by name
@@ -15,7 +16,14 @@
 
 -- Plain .h files are C here, not C++ (Neovim's default guess). Headers with
 -- real C++ content (class, template, namespace...) still detect as cpp.
+-- (Independent of the tags workflow, so it stays on either way.)
 vim.g.c_syntax_for_h = 1
+
+-- Everything below is gated on vim.g.use_ctags (init.lua); off means no
+-- ctags regeneration, no tag maps, no picker, no stack persistence.
+if not vim.g.use_ctags then
+  return
+end
 
 local project_root = require('custom.project').root
 local tagstack_picker, save_tagstack -- defined below; used by the FileType autocmd first

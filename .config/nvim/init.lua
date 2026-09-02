@@ -4,6 +4,9 @@ require 'custom.settings'
 -- workflow. Flip to true to bring the fuzzy pickers back (nothing is
 -- uninstalled). LSP goto mappings fall back to native vim.lsp.buf when off.
 vim.g.use_telescope = false
+-- The ctags workflow in after/plugin/c-tags.lua (regen on save, tag-stack
+-- picker, persistence) is off; gd / Ctrl-] are LSP. Flip to try tags again.
+vim.g.use_ctags = false
 
 local have_make = vim.fn.executable 'make' == 1
 
@@ -143,6 +146,75 @@ if vim.g.use_telescope then
   pcall(require('telescope').load_extension, 'fzf')
 end
 
+-- <leader>n: command mode prefilled with `:e <dir-of-current-file>/`, so a new
+-- file next to this one is just a name + Enter. The buffer exists at once;
+-- the file lands on disk on the first write. `:e ` alone (no path) would be
+-- relative to :pwd, which is often not where you are.
+vim.keymap.set('n', '<leader>n', function()
+  local dir = vim.fn.expand '%:h'
+  if dir == '' or dir == '.' then
+    dir = vim.fn.getcwd()
+  end
+  local prefix = ':e ' .. vim.fn.fnameescape(dir) .. '/'
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(prefix, true, false, true), 'n', false)
+end, { desc = '[N]ew file next to this one' })
+
+-- <leader>a: recently opened files, from the same ~/.edit_history the shell's
+-- ^S / <leader>sf fuzzy-finder reads (written on every BufReadPost in
+-- custom/settings). The last four in this repo, newest first; q/w/a/s (or
+-- j/k + Enter) open one, Esc closes.
+vim.keymap.set('n', '<leader>a', function()
+  local hist = vim.fn.expand '~/.edit_history'
+  if vim.fn.filereadable(hist) ~= 1 then
+    vim.notify('no ' .. hist .. ' yet', vim.log.levels.INFO)
+    return
+  end
+  local root = require('custom.project').root()
+  local cur = vim.api.nvim_buf_get_name(0)
+  local rows, seen = {}, {}
+  local lines = vim.fn.readfile(hist)
+  for i = #lines, 1, -1 do
+    local f = lines[i]
+    local rel = vim.fs.relpath(root, f)
+    if rel and f ~= cur and not seen[f] and vim.fn.filereadable(f) == 1 then
+      seen[f] = true
+      rows[#rows + 1] = { file = f, rel = rel }
+      if #rows == 4 then
+        break
+      end
+    end
+  end
+  if #rows == 0 then
+    vim.notify('no recent files in this project', vim.log.levels.INFO)
+    return
+  end
+  local hotkeys = { 'q', 'w', 'a', 's' }
+  local text = {}
+  for n, r in ipairs(rows) do
+    text[n] = (' %s  %s'):format(hotkeys[n] or ' ', r.rel)
+  end
+  -- Same height as the <S-Space> shell split (40% of the screen) so the
+  -- picker sits where the terminal does instead of a 4-line sliver.
+  local height = math.max(#text, math.floor(vim.o.lines * 0.4))
+  local buf, win, close = require('custom.term').scratch_split('recent://', text, { cursorline = true, height = height })
+  local function go(n)
+    local r = rows[n]
+    close()
+    if r then
+      vim.cmd.edit(vim.fn.fnameescape(r.file))
+    end
+  end
+  local opts = { buffer = buf, nowait = true, silent = true }
+  vim.keymap.set('n', '<CR>', function()
+    go(vim.api.nvim_win_get_cursor(win)[1])
+  end, opts)
+  for n = 1, math.min(#rows, #hotkeys) do
+    vim.keymap.set('n', hotkeys[n], function()
+      go(n)
+    end, opts)
+  end
+end, { desc = 'Recent files in project' })
+
 -- <leader>sg / <leader>sw: :grep (ripgrep -> quickfix; grepprg is set in
 -- custom/settings), recursive from the project root. sw runs it on the word
 -- under the cursor; sg leaves the pattern for you to type in command mode.
@@ -234,6 +306,45 @@ vim.api.nvim_create_autocmd('LspAttach', {
     for _, m in ipairs(goto_maps) do
       map(m[1], tb and tb[m[2]] or m[3], m[4])
     end
+    -- Ctrl-]: same jump as gd, but in a new split (the caller stays visible)
+    -- that is read-only while it's open: 'readonly' is per buffer, so it's
+    -- set on whatever buffer the split shows and put back when the split
+    -- closes. Hitting i there gives W10 "Changing a readonly file".
+    map('<C-]>', function()
+      vim.cmd.split()
+      local win = vim.api.nvim_get_current_win()
+      local touched = {} -- buf -> previous 'readonly'
+      local function lock(buf)
+        if touched[buf] == nil then
+          touched[buf] = vim.bo[buf].readonly
+          vim.bo[buf].readonly = true
+        end
+      end
+      lock(vim.api.nvim_get_current_buf())
+      local grp = vim.api.nvim_create_augroup('peek_readonly_' .. win, { clear = true })
+      vim.api.nvim_create_autocmd('BufWinEnter', {
+        group = grp,
+        callback = function(ev)
+          if vim.api.nvim_get_current_win() == win then
+            lock(ev.buf)
+          end
+        end,
+      })
+      vim.api.nvim_create_autocmd('WinClosed', {
+        group = grp,
+        pattern = tostring(win),
+        once = true,
+        callback = function()
+          for buf, was in pairs(touched) do
+            if vim.api.nvim_buf_is_valid(buf) then
+              vim.bo[buf].readonly = was
+            end
+          end
+          vim.api.nvim_del_augroup_by_id(grp)
+        end,
+      })
+      vim.lsp.buf.definition()
+    end, '[G]oto [D]efinition in split (read-only)')
     map('<leader>rn', vim.lsp.buf.rename, '[R]e[n]ame')
     map('<leader>ca', vim.lsp.buf.code_action, '[C]ode [A]ction', { 'n', 'x' })
     map('gD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
@@ -359,11 +470,16 @@ local optional_servers = {
       },
     },
   },
-  -- clangd is off for C and C++: both use the classic ctags workflow
-  -- (after/plugin/c-tags.lua). 'c' and 'cpp' are dropped from the default
-  -- filetype list so clangd never attaches there. Put them back to undo.
+  -- clangd on for C/C++ too (the ctags hook in after/plugin/c-tags.lua still
+  -- runs alongside it). Drop 'c'/'cpp' from this list to go ctags-only.
   clangd = {
-    filetypes = { 'objc', 'objcpp', 'cuda', 'proto' },
+    filetypes = { 'c', 'cpp', 'objc', 'objcpp', 'cuda', 'proto' },
+    -- Navigation and hover only: drop clangd's diagnostics on arrival so
+    -- nothing is stored or drawn (no squiggles, signs, virtual text, floats).
+    -- Compile errors come from the watcher; clang-tidy is :TidyConst.
+    handlers = {
+      ['textDocument/publishDiagnostics'] = function() end,
+    },
   },
   jdtls = {
     settings = {
@@ -625,7 +741,7 @@ vim.api.nvim_create_autocmd('FileType', {
 })
 
 require('ibl').setup {}
-require 'kickstart.plugins.lint'
+-- require 'kickstart.plugins.lint'
 require 'kickstart.plugins.gitsigns'
 
 require('nvim-ts-autotag').setup {}

@@ -144,8 +144,14 @@ local function make_term(cmd, opts)
       if opts.term_vim == false then
         vim.b[T.buf].term_vim = false
       end
-      T.job = vim.fn.jobstart(cmd, { term = true, env = opts.env and opts.env(T) or nil })
-      vim.cmd 'startinsert'
+      -- Tag the buffer BEFORE jobstart: TermOpen fires inside jobstart, and
+      -- hooks that need to know which terminal this is run there.
+      vim.b[T.buf].term_readonly = opts.normal_mode or nil
+      local spawn = type(cmd) == 'function' and cmd() or cmd
+      T.job = vim.fn.jobstart(spawn, { term = true, env = opts.env and opts.env(T) or nil })
+      if not opts.normal_mode then
+        vim.cmd 'startinsert'
+      end
       return
     end
     vim.api.nvim_set_current_win(T.win)
@@ -154,25 +160,35 @@ local function make_term(cmd, opts)
       -- streaming while the buffer had no window; nothing tells it to repaint
       -- on re-show and stale/partial frames result. Nudge the pty size by one
       -- column and back: the SIGWINCH makes it redraw from scratch. The TUI
-      -- owns its screen, so there's no scroll position worth restoring.
+      -- owns its live screen, so when it was left in terminal-job mode there
+      -- is no scroll position worth restoring.
       local rows, cols = vim.api.nvim_win_get_height(T.win), vim.api.nvim_win_get_width(T.win)
       pcall(vim.fn.jobresize, T.job, cols - 1, rows)
       vim.defer_fn(function()
         pcall(vim.fn.jobresize, T.job, cols, rows)
       end, 30)
+      if T.last_mode == 'n' and T.last_view then
+        -- Hidden from terminal-normal (e.g. gf on a path while browsing
+        -- scrollback): come back to that spot, not the live bottom. The
+        -- repaint above only rewrites the visible screen; scrollback and the
+        -- restored view are unaffected since normal mode doesn't auto-follow.
+        vim.cmd 'stopinsert'
+        vim.fn.winrestview(T.last_view)
+        return
+      end
       vim.cmd 'startinsert'
       return
     end
     -- If caller was in insert in their buffer, vim auto-enters terminal-job
     -- mode when focus lands on a terminal buffer, which auto-follows the
     -- terminal cursor (bottom). Force terminal-normal before restoring view.
-    if T.last_mode ~= 't' then
+    if opts.normal_mode or T.last_mode ~= 't' then
       vim.cmd 'stopinsert'
     end
     if T.last_view then
       vim.fn.winrestview(T.last_view)
     end
-    if T.last_mode == 't' then
+    if not opts.normal_mode and T.last_mode == 't' then
       vim.cmd 'startinsert'
     end
   end
@@ -255,8 +271,53 @@ Term = make_term({ 'claude', '-c' }, {
   end,
 })
 
+-- :NoAI swaps <C-Space> to a plain shell (same size, same keys) instead of
+-- Claude; :AI swaps it back. Both terminals persist in the background, so
+-- switching never restarts Claude or loses the shell's session. The choice
+-- is g:AI -- an UPPERCASE global, which the shada file saves and restores
+-- across sessions ('shada' contains `!`; see :h shada-!). Shada is read
+-- after init, so it's checked at keypress time, not at load.
+local function ai_on()
+  return vim.g.AI ~= 0
+end
+local AltTerm = make_term({ vim.o.shell }, {
+  height = 0.6,
+  term_vim = false,
+  env = parent_env,
+  on_open = function()
+    write_parent_state()
+  end,
+})
+local function ai_toggle()
+  if ai_on() then
+    Term.toggle()
+  else
+    AltTerm.toggle()
+  end
+end
 for _, key in ipairs { '<C-Space>', '<C-@>', '<NUL>' } do
-  vim.keymap.set({ 'n', 'i', 't' }, key, Term.toggle, { desc = 'Toggle bottom Claude terminal' })
+  vim.keymap.set({ 'n', 'i', 't' }, key, ai_toggle, { desc = 'Toggle bottom Claude terminal (:NoAI -> shell)' })
+end
+vim.api.nvim_create_user_command('AI', function()
+  vim.g.AI = 1
+  AltTerm.hide()
+  vim.notify '<C-Space>: Claude'
+end, { desc = '<C-Space> opens the Claude terminal (persists via shada)' })
+vim.api.nvim_create_user_command('NoAI', function()
+  vim.g.AI = 0
+  Term.hide()
+  vim.notify '<C-Space>: plain shell'
+end, { desc = '<C-Space> opens a plain shell instead of Claude (persists via shada)' })
+-- User commands must start uppercase, so :ai / :noai are command-line
+-- abbreviations that expand to :AI / :NoAI -- only when typed as the whole
+-- command, so "ai" inside e.g. :s/ai/x/ is untouched.
+for lower, upper in pairs { ai = 'AI', noai = 'NoAI' } do
+  vim.keymap.set('ca', lower, function()
+    if vim.fn.getcmdtype() == ':' and vim.fn.getcmdline() == lower then
+      return upper
+    end
+    return lower
+  end, { expr = true })
 end
 -- Shell split height: 60% (same as Claude) while gdb is running in it, else
 -- the usual 40%. Checked on each show, so toggle the shell away and back
@@ -278,7 +339,24 @@ local function shell_height(T)
   return 0.4
 end
 
-local ShellTerm = make_term({ vim.o.shell }, {
+-- The shell terminal's command: if the project has an executable
+-- watcher.sh, run it, and drop into an interactive shell when it exits
+-- (Ctrl-C) -- so <S-Space> shows the watcher already running. Otherwise a
+-- plain shell.
+local function project_watcher()
+  local root = require('custom.project').root()
+  if vim.fn.executable(root .. '/watcher.sh') == 1 then
+    return { vim.o.shell, '-ic', 'cd ' .. vim.fn.shellescape(root) .. ' && ./watcher.sh -a; exec ' .. vim.o.shell .. ' -i' }
+  end
+end
+
+-- When it's running the watcher this terminal is output to read, not a
+-- prompt to type at: it opens in normal mode (and `i` is blocked below), so
+-- j/k/gf work straight away. Without a watcher it's an ordinary shell.
+local ShellTerm = make_term(function()
+  return project_watcher() or { vim.o.shell }
+end, {
+  normal_mode = project_watcher() ~= nil,
   term_vim = false,
   height = shell_height,
   env = parent_env,
@@ -287,6 +365,49 @@ local ShellTerm = make_term({ vim.o.shell }, {
   end,
 })
 vim.keymap.set({ 'n', 'i', 't' }, '<S-Space>', ShellTerm.toggle, { desc = 'Toggle bottom shell terminal' })
+
+-- In the watcher terminal, the keys that would start typing at the shell are
+-- no-ops with a hint instead: it's a log to read, not a prompt. Applied
+-- directly (not via TermOpen, which fires during jobstart before this file
+-- has finished loading).
+local term_goto -- defined below; make_readonly binds it
+
+local function make_readonly(buf)
+  if not (buf and vim.api.nvim_buf_is_valid(buf)) then
+    return
+  end
+  -- The TermOpen autocmd that binds gf/gd runs during jobstart, before this
+  -- file has finished loading, so the pre-spawned watcher terminal misses it.
+  -- Bind them here too (idempotent).
+  for _, lhs in ipairs { 'gf', 'gd' } do
+    vim.keymap.set('n', lhs, term_goto, { buffer = buf, desc = 'Open file/symbol under cursor' })
+  end
+  for _, key in ipairs { 'i', 'I', 'a', 'A', 'o', 'O', 'c', 'C', 's', 'S', 'R' } do
+    vim.keymap.set('n', key, function()
+      vim.notify('watcher output -- read only (Ctrl-C for a shell)', vim.log.levels.INFO)
+    end, { buffer = buf })
+  end
+end
+
+-- Pre-spawn the shell terminal at startup when the project has a watcher, so
+-- it's already building by the time you press <S-Space>. Opened and hidden
+-- straight away (jobstart needs a window to attach the terminal to).
+vim.api.nvim_create_autocmd('VimEnter', {
+  group = vim.api.nvim_create_augroup('watcher_autostart', { clear = true }),
+  callback = function()
+    if not project_watcher() then
+      return
+    end
+    local win = vim.api.nvim_get_current_win()
+    ShellTerm.toggle()
+    make_readonly(ShellTerm.buf)
+    ShellTerm.hide()
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_set_current_win(win)
+    end
+    vim.cmd.stopinsert()
+  end,
+})
 
 -- Open a file from inside a terminal (the nvim() wrapper in .zshrc calls
 -- M.open_file over $NVIM when it's run in a :terminal): hide whichever terminal is
@@ -388,11 +509,68 @@ local function clean_token(tok)
   return tok
 end
 
+-- When the token under the cursor in a terminal isn't a path, try it as a
+-- SYMBOL: compiler output is full of names worth jumping to -- gcc's
+-- `In function 'skipWhiteSpace':`, `implicit declaration of function
+-- 'peekNext'`, a type in an error message.
+--
+-- ripgrep for the definition rather than asking the LSP: clangd only indexes
+-- files it has opened unless the project has compile_commands.json, so
+-- workspace/symbol comes back empty in a plain Makefile project. The
+-- patterns match a C/C++ definition at the start of a line -- `foo(`,
+-- `struct foo {`, `} foo;` -- not the call sites.
+local function symbol_goto(name, target_win)
+  -- gcc quotes names with U+2018/U+2019 (‘reallocate’), which the ASCII
+  -- strippers miss; take the identifier out of whatever wraps it.
+  name = name:match '[%a_][%w_]*' or ''
+  if name == '' then
+    return false
+  end
+  local root = require('custom.project').root()
+  local n = vim.fn.escape(name, '.[]()*+?^$')
+  local patterns = {
+    ('^[A-Za-z_].*\\b%s\\s*\\('):format(n), -- function definition/prototype
+    ('^\\s*(typedef\\s+)?(struct|union|enum)\\s+%s\\b'):format(n), -- type
+    ('^\\}\\s*%s\\s*;'):format(n), -- } Name;  (typedef tail)
+    ('^#define\\s+%s\\b'):format(n), -- macro
+  }
+  local hit
+  for _, pat in ipairs(patterns) do
+    local out = vim.fn.systemlist { 'rg', '--vimgrep', '--no-heading', '-e', pat, root }
+    if vim.v.shell_error == 0 and out[1] then
+      -- Prefer a .c/.cpp definition over a header declaration.
+      hit = out[1]
+      for _, line in ipairs(out) do
+        if line:match '%.c:%d' or line:match '%.cpp:%d' or line:match '%.cc:%d' then
+          hit = line
+          break
+        end
+      end
+      break
+    end
+  end
+  if not hit then
+    vim.notify('no definition found for ' .. name, vim.log.levels.WARN)
+    return true -- handled: don't fall through to "not a file"
+  end
+  local file, lnum, cnum = hit:match '^(.-):(%d+):(%d+):'
+  if target_win and vim.api.nvim_win_is_valid(target_win) then
+    vim.api.nvim_set_current_win(target_win)
+  else
+    vim.cmd 'wincmd p'
+  end
+  vim.cmd('edit ' .. vim.fn.fnameescape(file))
+  pcall(vim.api.nvim_win_set_cursor, 0, { tonumber(lnum), math.max(0, tonumber(cnum) - 1) })
+  vim.fn.search('\\V\\<' .. vim.fn.escape(name, '\\') .. '\\>', 'c', tonumber(lnum))
+  vim.cmd 'normal! zz'
+  return true
+end
+
 -- In a :terminal buffer, `gf` and `gd` resolve the token under the cursor
 -- (URL, or path with optional :LINE:COL) and open it in the underlying
 -- real editor window — the toggle terminal hides itself first. No LSP
 -- lookup happens here; the terminal buffer has no client.
-local function term_goto()
+function term_goto()
   local buf = vim.api.nvim_get_current_buf()
   local row = vim.api.nvim_win_get_cursor(0)[1]
   local col = vim.api.nvim_win_get_cursor(0)[2] + 1
@@ -490,10 +668,43 @@ local function term_goto()
     return { path = p, lnum = tonumber(lnum), cnum = tonumber(cnum) }
   end
 
+  -- A bare identifier under the cursor (gcc's ‘reallocate’, a type name) is a
+  -- symbol, not a path: go straight to the symbol lookup. Without this the
+  -- whitespace-stitching below would pick up an unrelated `memory.c:` earlier
+  -- on the same line and jump there instead.
+  local cword = vim.fn.expand '<cword>'
+  local cWORD = vim.fn.expand '<cWORD>'
+  if cword:match '^[%a_][%w_]*$' and not cWORD:match '[/.]' then
+    local cur = vim.api.nvim_get_current_win()
+    local win
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if w ~= cur and (vim.api.nvim_win_get_config(w).relative or '') == '' and vim.bo[vim.api.nvim_win_get_buf(w)].buftype == '' then
+        win = w
+        break
+      end
+    end
+    if symbol_goto(cword, win) then
+      return
+    end
+  end
+
   -- Prefer the stitched token; fall back to the single cursor line.
   local res = classify(joined) or classify(single)
   if not res then
-    vim.notify('Not a file: ' .. joined, vim.log.levels.WARN)
+    -- Not a path: try it as a symbol (gcc names functions and types in its
+    -- messages), keeping the watcher split open like the path case does.
+    local cur = vim.api.nvim_get_current_win()
+    local win
+    for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      -- A real editor window: not this terminal, not another terminal.
+      if w ~= cur and (vim.api.nvim_win_get_config(w).relative or '') == '' and vim.bo[vim.api.nvim_win_get_buf(w)].buftype == '' then
+        win = w
+        break
+      end
+    end
+    if not symbol_goto(clean_token(single), win) then
+      vim.notify('Not a file or symbol: ' .. joined, vim.log.levels.WARN)
+    end
     return
   end
   local path, lnum, cnum = res.path, res.lnum, res.cnum
@@ -506,10 +717,14 @@ local function term_goto()
     end
   end
   -- Hide whichever toggle terminal is up -- gf is mapped in every terminal
-  -- (Claude, shell, plain :terminal), not just the Claude one.
-  local float = visible_term()
-  if float then
-    float.hide()
+  -- (Claude, shell, plain :terminal), not just the Claude one. A read-only
+  -- watcher terminal stays: its output is the reason you're jumping, and you
+  -- want it still on screen to walk the next error.
+  if not vim.b[buf].term_readonly then
+    local t = visible_term()
+    if t then
+      t.hide()
+    end
   end
   if target and vim.api.nvim_win_is_valid(target) then
     vim.api.nvim_set_current_win(target)
@@ -526,7 +741,12 @@ end
 
 vim.api.nvim_create_autocmd('TermOpen', {
   callback = function(ev)
-    vim.keymap.set('n', 'gf', term_goto, { buffer = ev.buf, desc = 'Open file/URL under cursor in main window' })
+    -- gd as well as gf: in a terminal there is no "definition" to go to, so
+    -- both mean "open what's under the cursor" -- e.g. a gcc error's
+    -- scanner.c:59:12 in the watcher output.
+    for _, lhs in ipairs { 'gf', 'gd' } do
+      vim.keymap.set('n', lhs, term_goto, { buffer = ev.buf, desc = 'Open file/URL under cursor in main window' })
+    end
   end,
 })
 
@@ -618,5 +838,6 @@ M.visible = visible_term
 M.clean_token = clean_token
 M.shell = ShellTerm
 M.claude = Term
+M.alt = AltTerm
 
 return M

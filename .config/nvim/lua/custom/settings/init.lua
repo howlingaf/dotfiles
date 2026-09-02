@@ -36,18 +36,29 @@ vim.opt.exrc = true -- Load project-local .nvim.lua (prompts to trust on first u
 -- unlike scrolloff=999; the top half-screen stays uncentered). Mirrors
 -- vim-classic's CenterCursor autocmd.
 local wheel_scrolling = false
+local function center()
+  local bt = vim.bo.buftype
+  if (bt ~= '' and bt ~= 'help') or vim.fn.pumvisible() ~= 0 or wheel_scrolling then
+    return
+  end
+  -- In insert mode the cursor may sit past EOL (e.g. after `A`); the
+  -- normal-mode round trip of :normal clamps it onto the last char.
+  local curpos = vim.api.nvim_win_get_cursor(0)
+  vim.cmd 'normal! zz'
+  vim.api.nvim_win_set_cursor(0, curpos)
+end
 vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
   group = vim.api.nvim_create_augroup('center_cursor', {}),
+  callback = center,
+})
+-- Jumps that land by switching buffer/window (:edit, pickers, LSP
+-- definition into another file, Ctrl-o across files) restore a view
+-- without a cursor "move", so CursorMoved never fires; center on those too,
+-- a tick later so the jump has finished placing the cursor.
+vim.api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter', 'WinEnter' }, {
+  group = 'center_cursor',
   callback = function()
-    local bt = vim.bo.buftype
-    if (bt ~= '' and bt ~= 'help') or vim.fn.pumvisible() ~= 0 or wheel_scrolling then
-      return
-    end
-    -- In insert mode the cursor may sit past EOL (e.g. after `A`); the
-    -- normal-mode round trip of :normal clamps it onto the last char.
-    local curpos = vim.api.nvim_win_get_cursor(0)
-    vim.cmd 'normal! zz'
-    vim.api.nvim_win_set_cursor(0, curpos)
+    vim.schedule(center)
   end,
 })
 
@@ -73,7 +84,25 @@ vim.opt.smartindent = true -- Add indent for new blocks in C-like syntax.
 vim.opt.textwidth = 80 -- Line wrap limit.
 vim.opt.colorcolumn = '80' -- Draw a vertical line at column 80.
 vim.opt.completeopt = 'menuone,noselect' -- Better completion behavior.
-vim.opt.cursorline = true -- Highlight current line.
+vim.opt.cursorline = true -- Highlight current line...
+-- ...only in the focused window: 'cursorline' is per-window, so switch it
+-- off on leave and back on on enter (pickers set their own and are skipped).
+vim.api.nvim_create_autocmd({ 'WinEnter', 'BufWinEnter' }, {
+  group = vim.api.nvim_create_augroup('cursorline_focus', { clear = true }),
+  callback = function()
+    if vim.bo.buftype == '' or vim.bo.buftype == 'help' then
+      vim.wo.cursorline = true
+    end
+  end,
+})
+vim.api.nvim_create_autocmd('WinLeave', {
+  group = 'cursorline_focus',
+  callback = function()
+    if vim.bo.buftype == '' or vim.bo.buftype == 'help' then
+      vim.wo.cursorline = false
+    end
+  end,
+})
 vim.opt.list = true -- Show invisible characters.
 vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣' }
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
@@ -298,7 +327,15 @@ vim.keymap.set('n', '<C-z>', '<Nop>', { silent = true })
 -- Enable full color support.
 vim.opt.termguicolors = true
 
-vim.keymap.set('n', '<leader>wr', ':set wrap!<CR>', { noremap = true, silent = true })
+
+-- Window focus: <C-h/j/k/l> move between splits (editor, tag picker, the
+-- bottom terminals...). In terminal mode only <C-k> is taken -- up is the
+-- way out of a bottom split -- since <C-h> (backspace), <C-j> (Enter) and
+-- <C-l> (clear) belong to the shell there.
+for key, dir in pairs { h = 'h', j = 'j', k = 'k', l = 'l' } do
+  vim.keymap.set('n', '<C-' .. key .. '>', '<C-w>' .. dir, { silent = true, desc = 'Window: ' .. dir })
+end
+vim.keymap.set('t', '<C-k>', [[<C-\><C-n><C-w>k]], { silent = true, desc = 'Window: up (leave terminal)' })
 
 -- Highlight text momentarily after yanking.
 vim.api.nvim_create_autocmd('TextYankPost', {
