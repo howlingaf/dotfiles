@@ -1,0 +1,8 @@
+# Track only the source. Everything else here is regenerated (elpa packages,
+# native-comp/eln, caches) or per-machine state (history, recentf, projects).
+/*
+!/.gitignore
+!/init.el
+!/editor.el
+!/lisp/
+!/lisp/targets.el
